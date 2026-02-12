@@ -1,18 +1,18 @@
 import logging
 import os
 import shutil
-from telegram import Update
+from telegram import InlineKeyboardMarkup, Update , InlineKeyboardButton
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, 
     filters, ConversationHandler, CallbackQueryHandler, ContextTypes,
-    InlineQueryHandler, TypeHandler, Application
+    InlineQueryHandler, TypeHandler, Application , ChatMemberHandler
 )
 
 from config import Config
-from database.connection import init_db
+from database.user_service import initialize_database , get_locked_channels
+from handlers.settings import settings_panel, settings_callback, receive_preset_value, SETTINGS_MENU, WAITING_PRESET_VALUE , WAITING_SETTINGS_CHANNEL   
 
 from handlers.start import start
-
 from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
 
 from handlers.editor import (
@@ -24,6 +24,16 @@ from handlers.editor import (
     cancel_command, 
     handle_timeout,
     inline_query_handler
+)
+from handlers.admin import (
+    admin_panel, 
+    admin_callback, 
+    process_broadcast, 
+    cancel_broadcast,
+    set_lock_channel,
+    ADMIN_MENU,
+    BROADCAST_REQUEST,
+    WAITING_LOCK_CHANNEL
 )
 
 logging.basicConfig(
@@ -63,9 +73,142 @@ async def global_button_handler(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer("⚠️ این نشست منقضی شده است.", show_alert=True)
 
+async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    locked_channels = get_locked_channels()
+    
+    if not locked_channels:
+        return True
+
+    not_joined_channels = []
+    
+    for ch_id, title, link in locked_channels:
+        try:
+            member = await context.bot.get_chat_member(chat_id=ch_id, user_id=user_id)
+            if member.status in ['left', 'kicked']:
+                not_joined_channels.append((title, link))
+        except:
+            not_joined_channels.append((title, link))
+
+    if not not_joined_channels:
+        return True
+    
+  
+    keyboard = []
+    for title, link in not_joined_channels:
+    
+        display_title = title if len(title) < 25 else title[:22] + "..."
+        keyboard.append([InlineKeyboardButton(f"📣 {display_title}", url=link)])
+    
+ 
+    keyboard.append([InlineKeyboardButton("🔄 بررسی عضویت", callback_data="check_join_status")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+
+    msg_text = (
+        "🔒 **دسترسی محدود شده است**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "👋 کاربر گرامی، جهت حمایت از ما و استفاده رایگان از ربات، لطفاً در کانال‌های اسپانسر عضو شوید.\n\n"
+        "✅ **به محض عضویت، این پیام خودکار محو می‌شود.**"
+    )
+
+
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(text=msg_text, reply_markup=reply_markup, parse_mode='Markdown')
+        except: pass
+    elif update.message:
+        msg = await context.bot.send_message(chat_id=user_id, text=msg_text, reply_markup=reply_markup, parse_mode='Markdown')
+        context.bot_data[f"lock_msg_{user_id}"] = msg.message_id
+        
+    return False
+
+async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    
+
+    is_fully_joined = await check_membership(update, context)
+
+    if is_fully_joined:
+
+        await query.answer("✅ عضویت تایید شد! خوش آمدید.", show_alert=True)
+        try: await query.message.delete() 
+        except: pass
+        await context.bot.send_message(update.effective_chat.id, "🎉 حالا می‌تونی آهنگت رو بفرستی!")
+    else:
+        await query.answer("❌ هنوز در تمام کانال‌ها عضو نشده‌اید!", show_alert=True)
+
+
+async def protected_start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_membership(update, context):
+        return await start_editor(update, context)
+    return ConversationHandler.END
+
+async def auto_check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    result = update.chat_member
+    if not result: return
+
+    user_id = result.from_user.id
+    new_status = result.new_chat_member.status
+    
+    if new_status not in ['member', 'administrator', 'creator']:
+        return
+
+    locked_channels = get_locked_channels()
+    not_joined_channels = []
+    
+    for ch_id, title, link in locked_channels:
+        try:
+            member = await context.bot.get_chat_member(chat_id=ch_id, user_id=user_id)
+            if member.status in ['left', 'kicked']:
+                not_joined_channels.append((title, link))
+        except:
+            not_joined_channels.append((title, link))
+
+    lock_msg_id = context.bot_data.get(f"lock_msg_{user_id}")
+    if not lock_msg_id: return 
+
+    if not not_joined_channels:
+        try:
+            await context.bot.delete_message(chat_id=user_id, message_id=lock_msg_id)
+            del context.bot_data[f"lock_msg_{user_id}"] 
+        except: pass
+        
+        success_msg = await context.bot.send_message(
+            chat_id=user_id, 
+            text="🎉 **عضویت شما تایید شد!**\nاکنون می‌توانید فایل خود را ارسال کنید. 🎧",
+            parse_mode='Markdown'
+        )
+
+    
+    else:
+        keyboard = []
+        for title, link in not_joined_channels:
+            display_title = title if len(title) < 25 else title[:22] + "..."
+            keyboard.append([InlineKeyboardButton(f"📣 {display_title}", url=link)])
+        
+        keyboard.append([InlineKeyboardButton("🔄 بررسی عضویت", callback_data="check_join_status")])
+        
+        try:
+            await context.bot.edit_message_text(
+                chat_id=user_id,
+                message_id=lock_msg_id,
+                text=(
+                    "🔒 **دسترسی محدود شده است**\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "🙏 **هنوز تمام نشده!**\n"
+                    "لطفاً در کانال‌های باقی‌مانده نیز عضو شوید:\n\n"
+                    "✅ **به محض تکمیل، قفل باز می‌شود.**"
+                ),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+        except: pass
+
+
 def main():
     print("Initializing database and clearing downloads...")
-    init_db()
+    initialize_database()
     clear_downloads()
 
     app = (
@@ -78,8 +221,34 @@ def main():
         .build()
     )
 
+
+    admin_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler('admin', admin_panel)
+        ],
+        states={
+            ADMIN_MENU: [
+                CallbackQueryHandler(admin_callback)
+            ],
+            BROADCAST_REQUEST: [
+                
+                CallbackQueryHandler(admin_callback),
+                MessageHandler(filters.ALL & ~filters.COMMAND, process_broadcast)
+            ],
+            WAITING_LOCK_CHANNEL: [
+                CallbackQueryHandler(admin_callback), 
+                MessageHandler(filters.TEXT & ~filters.COMMAND, set_lock_channel)
+            ]
+        },
+        fallbacks=[
+            CommandHandler('cancel', cancel_broadcast),
+            CallbackQueryHandler(admin_callback, pattern='^close_panel$')
+        ],
+        per_message=False
+    )
+    
     conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.AUDIO, start_editor)],
+        entry_points=[MessageHandler(filters.AUDIO, protected_start_editor)], 
         states={
             SELECT_ACTION: [CallbackQueryHandler(handle_button_click)],
             WAITING_INPUT: [
@@ -100,17 +269,43 @@ def main():
             CommandHandler("cancel", cancel_command)
         ],
         allow_reentry=True,
-        conversation_timeout=60 
+        conversation_timeout=60,
+        per_message=False
     )
 
+    settings_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler('settings', settings_panel) , 
+            CallbackQueryHandler(settings_panel, pattern='^open_settings$')
+        ],
+        states={
+            SETTINGS_MENU: [CallbackQueryHandler(settings_callback)],
+            WAITING_PRESET_VALUE: [
+                CallbackQueryHandler(settings_callback), 
+                MessageHandler(filters.TEXT | filters.PHOTO, receive_preset_value)
+            ],
+            WAITING_SETTINGS_CHANNEL: [
+                CallbackQueryHandler(settings_callback), 
+                MessageHandler(filters.TEXT | filters.FORWARDED, receive_channel)
+            ]
+        },
+        fallbacks=[CommandHandler('cancel', cancel_command)], 
+        per_message=False
+    )
+
+    app.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join_status$'))
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(settings_conv)
+    app.add_handler(CommandHandler('settings', settings_panel))
+    app.add_handler(ChatMemberHandler(auto_check_join, ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(admin_conv)
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(start_over_callback, pattern='^start_over$'))
     app.add_handler(InlineQueryHandler(inline_query_handler))
     app.add_handler(CallbackQueryHandler(global_button_handler))
 
     print("BOT IS RUNNING...")
-    app.run_polling()
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()

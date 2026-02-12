@@ -12,7 +12,8 @@ from database.user_service import (
     get_user_channels, 
     toggle_channel_selection, 
     delete_channel, 
-    get_selected_channels
+    get_selected_channels ,
+    get_user_presets, get_fast_mode
 )
 from telegram import InlineQueryResultCachedAudio
 from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
@@ -45,9 +46,7 @@ def cleanup_all_files(file_path):
 
 async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    context.user_data['chat_id'] = update.effective_chat.id
-    msg = await update.message.reply_text("⏳ در حال دانلود و آنالیز...")
+    msg = await update.message.reply_text("⏳ در حال دانلود و بررسی تنظیمات...")
     
     file_id = update.message.audio.file_id
     new_file = await context.bot.get_file(file_id)
@@ -59,14 +58,42 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['filename'] = update.message.audio.file_name or "music.mp3"
     context.user_data['locked_tags'] = []
 
+
+    presets = get_user_presets(user_id)
+    if presets:
+
+        cover_file_id = presets.get('has_cover')
+        tags_to_apply = {k: v for k, v in presets.items() if k != 'has_cover'}
+        
+
+        if tags_to_apply:
+            apply_tags(file_path, tags_to_apply)
+            for t in tags_to_apply: context.user_data['changes'].append(t)
+        
+
+        if cover_file_id:
+            try:
+
+                cover_file = await context.bot.get_file(cover_file_id)
+                cover_path = os.path.join(Config.DOWNLOAD_PATH, f"preset_cover_{user_id}.jpg")
+                await cover_file.download_to_drive(cover_path)
+                set_cover_from_file(file_path, cover_path)
+                os.remove(cover_path) 
+                context.user_data['changes'].append('has_cover')
+            except Exception as e:
+                print(f"Error setting preset cover: {e}")
+
     try: await msg.delete()
     except: pass
 
-    await show_panel(update, context, is_first_time=True)
-    
-    print("✅ Start Editor Finished! Returning State 0") 
-    return SELECT_ACTION
 
+    if get_fast_mode(user_id):
+
+        await fast_finish_process(update, context)
+        return ConversationHandler.END
+
+    await show_panel(update, context, is_first_time=True)
+    return SELECT_ACTION
 async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, is_first_time=False):
     file_path = context.user_data.get('file_path')
     if not file_path:
@@ -91,6 +118,7 @@ async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, is_firs
         f"🎹 Genre: `{tags['genre']}` {mark('genre')}\n"
         f"📅 Year: `{tags['year']}` {mark('year')}\n"
         f"🔢 Track: `{tags.get('track', '0')}` {mark('track')}\n"
+        f"💬 Comment: `{tags.get('comment', '')}` {mark('comment')}\n"
         f"📝 Lyrics: {'✅ دارد' if tags.get('lyrics') else '❌ ندارد'} {mark('lyrics')}\n"
         f"🖼 Cover: {'✅ دارد' if tags.get('has_cover') else '❌ ندارد'} {mark('has_cover')}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -598,14 +626,16 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     channel_id = None
     channel_title = "Unknown Channel"
 
+
     if update.message.forward_from_chat and update.message.forward_from_chat.type == 'channel':
         channel_id = update.message.forward_from_chat.id
         channel_title = update.message.forward_from_chat.title
     elif update.message.text:
         channel_id = update.message.text.strip()
-    
+
     try: await update.message.delete()
     except: pass
+
 
     msg_id = context.user_data.get('msg_to_delete')
     if msg_id:
@@ -626,39 +656,88 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if member.status == 'administrator' and not member.can_post_messages:
              raise Exception("⛔️ ربات ادمین است اما دسترسی **ارسال پیام** ندارد.")
 
+
         chat_info = await context.bot.get_chat(chat_id=channel_id)
         final_id = chat_info.id
         final_title = chat_info.title
         
+
         if add_channel(update.effective_user.id, final_id, final_title):
-            success_msg = await update.message.reply_text(
-                f"✅ کانال **{final_title}** با موفقیت تایید و اضافه شد!",
-                parse_mode='Markdown'
-            )
+            success_text = f"✅ کانال **{final_title}** اضافه شد!"
         else:
-            success_msg = await update.message.reply_text("⚠️ این کانال قبلاً در لیست شما وجود دارد.")
+            success_text = "⚠️ این کانال قبلاً در لیست شما وجود دارد."
 
-        await asyncio.sleep(2)
-        try: await success_msg.delete()
-        except: pass
 
-        await show_advanced_panel(update, context) 
-        return SELECT_ACTION
+        if context.user_data.get('from_settings'):
+            from handlers.settings import SETTINGS_MENU 
+            
 
-    except Exception as e:
-        err_text = str(e).replace('Exception:', '').strip()
-        
-        err_msg = await update.message.reply_text(
-            f"❌ **خطا:**\n{err_text}\n\n"
-            f"👇 مجدداً آیدی صحیح را ارسال کنید یا دکمه انصراف را بزنید.",
-            parse_mode='Markdown'
-        )
-        
-        await asyncio.sleep(5)
+            msg = await context.bot.send_message(update.effective_chat.id, success_text, parse_mode='Markdown')
+            await asyncio.sleep(2)
+            try: await msg.delete()
+            except: pass
+            
+            context.user_data.pop('from_settings', None)
+            
 
+            user_id = update.effective_user.id
+            panel_id = context.user_data.get('settings_panel_id')
+            
+            channels = get_user_channels(user_id)
+            keyboard = []
+            
+
+            for ch_id, title, is_selected in channels:
+                status = "✅" if is_selected else "❌"
+                keyboard.append([InlineKeyboardButton(f"{status} {title}", callback_data=f"toggle_ch_set_{ch_id}")])
+            
+            controls = []
+            controls.append(InlineKeyboardButton("➕ افزودن کانال", callback_data='add_new_channel_settings'))
+            
+            if channels: 
+                controls.append(InlineKeyboardButton("🗑 مدیریت حذف", callback_data='mode_delete_settings'))
+            
+            keyboard.append(controls)
+            keyboard.append([InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data='back_to_main_settings')])
+            
+            msg_text = "📢 **مدیریت کانال‌های مقصد (تنظیمات)**\n\n✅ = ارسال می‌شود\n❌ = ارسال نمی‌شود"
+
+
+            if panel_id:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=user_id,
+                        message_id=panel_id,
+                        text=msg_text,
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode='Markdown'
+                    )
+                except:
+                    new_msg = await context.bot.send_message(user_id, msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+                    context.user_data['settings_panel_id'] = new_msg.message_id
+            
+            return SETTINGS_MENU
+
+        else:
+            msg = await update.message.reply_text(success_text, parse_mode='Markdown')
+            await asyncio.sleep(2)
+            try: await msg.delete()
+            except: pass
+
+            await show_advanced_panel(update, context) 
+            return SELECT_ACTION
+
+    except Exception as e:     
+        err_msg = await update.message.reply_text(f"❌ {e}")
+        await asyncio.sleep(4)
         try: await err_msg.delete()
         except: pass
+        
 
+        if context.user_data.get('from_settings'):
+            from handlers.settings import WAITING_SETTINGS_CHANNEL
+            return WAITING_SETTINGS_CHANNEL
+            
         return WAITING_CHANNEL
 
 async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -960,6 +1039,83 @@ async def show_convert_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
+
+
+async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    status_msg = await update.message.reply_text("⚡️ **ویرایش سریع فعال است...**\nدر حال ارسال فایل نهایی 📤")
+    
+    file_path = context.user_data.get('file_path')
+    display_filename = context.user_data.get('filename', 'music.mp3')
+    
+    selected_channels = get_selected_channels(user_id)
+
+    thumb_path = None
+    try:
+        from mutagen.mp3 import MP3
+        from mutagen.id3 import ID3, APIC
+        audio = MP3(file_path, ID3=ID3)
+        if audio.tags:
+            for tag in audio.tags.values():
+                if isinstance(tag, APIC):
+                    import random
+                    thumb_path = file_path.replace(".mp3", f"_thumb_{random.randint(1000,9999)}.jpg")
+                    with open(thumb_path, "wb") as f:
+                        f.write(tag.data)
+                    break
+    except Exception as e:
+        print(f"Thumb extraction error: {e}")
+
+    sent_count = 0
+    try:
+        with open(file_path, 'rb') as audio_file:
+            thumb_file = open(thumb_path, 'rb') if thumb_path and os.path.exists(thumb_path) else None
+            
+
+            await context.bot.send_audio(
+                chat_id=update.effective_chat.id,
+                audio=audio_file,
+                filename=display_filename,
+                caption=f"✅ فایل شما آماده شد (ویرایش سریع).\n🤖 @YourBotName",
+                thumbnail=thumb_file, 
+                title=context.user_data.get('title', ''), 
+                performer=context.user_data.get('artist', '') 
+            )
+            
+
+            if selected_channels:
+                for ch_id in selected_channels:
+                    try:
+                        audio_file.seek(0)
+                        if thumb_file: thumb_file.seek(0)
+                        
+                        await context.bot.send_audio(
+                            chat_id=ch_id,
+                            audio=audio_file,
+                            filename=display_filename,
+                            thumbnail=thumb_file,
+                            caption=f"🎧 @YourBotName" 
+                        )
+                        sent_count += 1
+                    except Exception as e:
+                        print(f"Failed to send to channel {ch_id}: {e}")
+
+            if thumb_file: thumb_file.close()
+            
+            if sent_count > 0:
+                await update.message.reply_text(f"🚀 فایل همزمان به **{sent_count}** کانال شما ارسال شد.")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ خطا در ارسال: {e}")
+
+    if thumb_path and os.path.exists(thumb_path): 
+        try: os.remove(thumb_path)
+        except: pass
+        
+    cleanup_all_files(file_path)
+    try: await status_msg.delete()
+    except: pass
+    context.user_data.clear()
 
 def get_thumb_path(file_path):
     from mutagen.mp3 import MP3
