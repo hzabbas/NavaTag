@@ -12,7 +12,7 @@ from config import Config
 from database.user_service import initialize_database , get_locked_channels
 from handlers.settings import settings_panel, settings_callback, receive_preset_value, SETTINGS_MENU, WAITING_PRESET_VALUE , WAITING_SETTINGS_CHANNEL   
 
-from handlers.start import start
+from handlers.start import start, initial_language_selection, help_support_callback
 from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
 
 from handlers.editor import (
@@ -276,6 +276,8 @@ def main():
 
     app.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join_status$'))
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(initial_language_selection, pattern='^set_lang_'))
+    app.add_handler(CallbackQueryHandler(help_support_callback, pattern='^(help|support|back_start)$'))
     app.add_handler(settings_conv)
     app.add_handler(CommandHandler('settings', settings_panel))
     app.add_handler(ChatMemberHandler(auto_check_join, ChatMemberHandler.CHAT_MEMBER))

@@ -1,37 +1,73 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from database.user_service import add_user
+from database.user_service import add_user, has_language_set, set_user_setting
+from utils.locales import get_text
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE , edit=False):
-
     user = update.effective_user
     add_user(user.id, user.username, user.full_name)
     
+    if not has_language_set(user.id):
+        keyboard = [
+            [
+                InlineKeyboardButton("🇮🇷 فارسی", callback_data='set_lang_fa'),
+                InlineKeyboardButton("🇺🇸 English", callback_data='set_lang_en')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        text = "لطفاً زبان خود را انتخاب کنید:\n\nPlease select your language:"
+        
+        if edit and update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+        else:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup)
+        return
+
     keyboard = [
         [
-            InlineKeyboardButton("🎵 راهنما", callback_data='help'),
-            InlineKeyboardButton("📢 کانال ما", url='https://t.me/VoidSuspended')
+            InlineKeyboardButton(get_text(user.id, 'help_btn'), callback_data='help'),
+            InlineKeyboardButton(get_text(user.id, 'channel_btn'), url='https://t.me/VoidSuspended')
         ],
         [
-             InlineKeyboardButton("⚙️ تنظیمات شخصی (جدید)", callback_data='open_settings') 
+             InlineKeyboardButton(get_text(user.id, 'settings_btn'), callback_data='open_settings') 
         ],
         [
-            InlineKeyboardButton("👨‍💻 پشتیبانی", callback_data='support')
+            InlineKeyboardButton(get_text(user.id, 'support_btn'), callback_data='support')
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    welcome_text = (
-        f"درود {user.first_name}، به **NavaTag** خوش آمدید. 🌑\n\n"
-        "اینجا، ابزاری دقیق برای مدیریت متادیتای فایل‌های صوتی شماست.\n"
-        "قابلیت‌هایی که در اختیار دارید:\n\n"
-        "• ویرایش کامل تگ‌های ID3 (عنوان، هنرمند، آلبوم و...)\n"
-        "• مدیریت متمرکز کاور آرت و متن آهنگ (Lyrics)\n"
-        "• ابزارهای پیشرفته مانند برش صوتی، تبدیل فرمت و نام‌گذاری استاندارد\n\n"
-        "📂 فایل صوتی خود را جهت شروع فرآیند ارسال کنید."
-    )
+    welcome_text = get_text(user.id, 'welcome').format(name=user.first_name)
 
     if edit and update.callback_query:
         await update.callback_query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def initial_language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = query.data.replace('set_lang_', '')
+    
+    set_user_setting(user_id, 'language', lang)
+    await query.answer("✅")
+    await start(update, context, edit=True)
+
+async def help_support_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    data = query.data
+
+    if data == 'back_start':
+        await start(update, context, edit=True)
+        return
+
+    text = get_text(user_id, 'help_text') if data == 'help' else get_text(user_id, 'support_text')
+    
+    keyboard = [[InlineKeyboardButton(get_text(user_id, 'back_to_start'), callback_data='back_start')]]
+    
+    await query.answer()
+    await query.edit_message_text(
+        text=text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )

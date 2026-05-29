@@ -2,6 +2,7 @@ import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
 from telegram.error import BadRequest
+from utils.locales import get_text
 
 from database.user_service import (
     get_selected_channels, set_fast_mode, get_fast_mode, 
@@ -24,45 +25,43 @@ async def safe_delete(message):
 
 def get_settings_keyboard(user_id):
     is_fast = get_fast_mode(user_id)
-    fast_icon = "✅ روشن" if is_fast else "❌ خاموش"
+    fast_icon = get_text(user_id, 'fast_mode_on') if is_fast else get_text(user_id, 'fast_mode_off')
     
     presets = get_user_presets(user_id)
     selected_ch = get_selected_channels(user_id)
-    ch_status = f"{len(selected_ch)} کانال" if selected_ch else "❌ غیرفعال"
+    ch_status = get_text(user_id, 'active_channels').format(count=len(selected_ch)) if selected_ch else get_text(user_id, 'inactive')
     
     def tag_status(tag):
         if tag == 'cover':
-            return "🔒 فیکس" if 'has_cover' in presets else "📝 تنظیم نشده"
-        return f"🔒 {presets[tag]}" if tag in presets else "📝 تنظیم نشده"
+            return get_text(user_id, 'fixed_cover') if 'has_cover' in presets else get_text(user_id, 'not_set')
+        return get_text(user_id, 'locked').format(value=presets[tag]) if tag in presets else get_text(user_id, 'not_set')
 
     keyboard = [
-        [InlineKeyboardButton(f"⚡️ حالت ویرایش سریع: {fast_icon}", callback_data='toggle_fast_mode')],
-        [InlineKeyboardButton(f"📢 ارسال خودکار به کانال: {ch_status}", callback_data='manage_channels_settings')],
-        [InlineKeyboardButton("🛠 تنظیمات تگ‌های ثابت (قفل) 🛠", callback_data='ignore')],
+        [InlineKeyboardButton(get_text(user_id, 'fast_mode_btn').format(status=fast_icon), callback_data='toggle_fast_mode')],
+        [InlineKeyboardButton(get_text(user_id, 'auto_send_btn').format(status=ch_status), callback_data='manage_channels_settings')],
+        [InlineKeyboardButton(get_text(user_id, 'fixed_tags_btn'), callback_data='ignore')],
         [
-            InlineKeyboardButton(f"👤 خواننده: {tag_status('artist')}", callback_data='set_preset_artist'),
-            InlineKeyboardButton(f"🎵 آلبوم: {tag_status('album')}", callback_data='set_preset_album')
+            InlineKeyboardButton(get_text(user_id, 'artist_btn').format(status=tag_status('artist')), callback_data='set_preset_artist'),
+            InlineKeyboardButton(get_text(user_id, 'album_btn').format(status=tag_status('album')), callback_data='set_preset_album')
         ],
         [
-            InlineKeyboardButton(f"🎹 ژانر: {tag_status('genre')}", callback_data='set_preset_genre'),
-            InlineKeyboardButton(f"📅 سال: {tag_status('year')}", callback_data='set_preset_year')
+            InlineKeyboardButton(get_text(user_id, 'genre_btn').format(status=tag_status('genre')), callback_data='set_preset_genre'),
+            InlineKeyboardButton(get_text(user_id, 'year_btn').format(status=tag_status('year')), callback_data='set_preset_year')
         ],
         [
-            InlineKeyboardButton(f"🖼 کاور ثابت: {tag_status('cover')}", callback_data='set_preset_cover'),
-            InlineKeyboardButton(f"💬 کامنت: {tag_status('comment')}", callback_data='set_preset_comment')
+            InlineKeyboardButton(get_text(user_id, 'cover_btn').format(status=tag_status('cover')), callback_data='set_preset_cover'),
+            InlineKeyboardButton(get_text(user_id, 'comment_btn').format(status=tag_status('comment')), callback_data='set_preset_comment')
         ],
-        [InlineKeyboardButton("❌ بستن منوی تنظیمات", callback_data='close_settings')]
+        [
+            InlineKeyboardButton(get_text(user_id, 'language_btn'), callback_data='toggle_language')
+        ],
+        [InlineKeyboardButton(get_text(user_id, 'close_settings_btn'), callback_data='close_settings')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 async def settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    msg_text = (
-        "⚙️ **تنظیمات شخصی شما**\n\n"
-        "در اینجا می‌توانید:\n"
-        "1️⃣ **ویرایش سریع:** اگر روشن باشد، آهنگ بلافاصله با تگ‌های شما ادیت و ارسال می‌شود (بدون نمایش پنل).\n"
-        "2️⃣ **تگ‌های ثابت:** مقادیری که همیشه روی آهنگ‌های شما تنظیم شوند (مثل نام خودتان به عنوان آرتیست)."
-    )
+    msg_text = get_text(user_id, 'settings_menu')
 
     if update.callback_query:
         await update.callback_query.answer()
@@ -85,11 +84,26 @@ async def settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['settings_panel_id'] = msg.message_id
 
     return SETTINGS_MENU
-
 async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     data = query.data
+
+    if data == 'toggle_language':
+        from database.user_service import get_user_language, set_user_setting
+        current_lang = get_user_language(user_id)
+        new_lang = 'en' if current_lang == 'fa' else 'fa'
+        set_user_setting(user_id, 'language', new_lang)
+        await query.answer(get_text(user_id, 'lang_changed'))
+        try:
+            await query.edit_message_text(
+                text=get_text(user_id, 'settings_menu'),
+                reply_markup=get_settings_keyboard(user_id),
+                parse_mode='Markdown'
+            )
+        except BadRequest:
+            pass
+        return SETTINGS_MENU
 
     if data == 'manage_channels_settings':
         await show_settings_channels(update, context, mode='view')
@@ -135,7 +149,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == 'back_to_main_settings':
         await query.edit_message_text(
-            "⚙️ **تنظیمات شخصی شما**",
+            get_text(user_id, 'settings_menu'),
             reply_markup=get_settings_keyboard(user_id),
             parse_mode='Markdown'
         )
@@ -184,7 +198,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == 'back_to_settings':
         await query.edit_message_text(
-            "⚙️ **تنظیمات شخصی شما**",
+            get_text(user_id, 'settings_menu'),
             reply_markup=get_settings_keyboard(user_id),
             parse_mode='Markdown'
         )
