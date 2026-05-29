@@ -138,3 +138,9 @@ def get_selected_channels(user_id):
 
 def set_user_setting(user_id, key, value):
     _execute('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)', (user_id, key, str(value)))
+def has_language_set(user_id):
+    res = _execute('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', (user_id, 'language'), fetch=True)
+    return bool(res)
+def get_user_language(user_id):
+    res = _execute('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', (user_id, 'language'), fetch=True)
+    return res[0] if res else 'fa'
