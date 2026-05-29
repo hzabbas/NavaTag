@@ -20,6 +20,7 @@ from database.user_service import (
 from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
 from utils.tagger import get_tags, set_tag, set_cover_from_file, delete_all_tags, apply_tags
 from utils.pro_tools import convert_audio, detect_lyrics_lang, generate_standard_filename, smart_clean_tags
+from utils.locales import get_text
 
 async def safe_delete(message):
     if not message:
@@ -46,9 +47,11 @@ def cleanup_all_files(file_path):
         except OSError as e:
             print(f"Cleanup Error ({target}): {e}")
             
+
+
 async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    msg = await update.message.reply_text("⏳ در حال دانلود و بررسی تنظیمات...")
+    msg = await update.message.reply_text(get_text(user_id, 'downloading'))
     
     file_id = update.message.audio.file_id
     new_file = await context.bot.get_file(file_id)
@@ -60,22 +63,17 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['filename'] = update.message.audio.file_name or "music.mp3"
     context.user_data['locked_tags'] = []
 
-
     presets = get_user_presets(user_id)
     if presets:
-
         cover_file_id = presets.get('has_cover')
         tags_to_apply = {k: v for k, v in presets.items() if k != 'has_cover'}
         
-
         if tags_to_apply:
             apply_tags(file_path, tags_to_apply)
             for t in tags_to_apply: context.user_data['changes'].append(t)
         
-
         if cover_file_id:
             try:
-
                 cover_file = await context.bot.get_file(cover_file_id)
                 cover_path = os.path.join(Config.DOWNLOAD_PATH, f"preset_cover_{user_id}.jpg")
                 await cover_file.download_to_drive(cover_path)
@@ -87,14 +85,13 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await safe_delete(msg)
 
-
     if get_fast_mode(user_id):
-
         await fast_finish_process(update, context)
         return ConversationHandler.END
 
     await show_panel(update, context, is_first_time=True)
     return SELECT_ACTION
+
 async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, is_first_time=False):
     file_path = context.user_data.get('file_path')
     if not file_path:
@@ -103,36 +100,30 @@ async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, is_firs
     panel_id = context.user_data.get('panel_id')
     changes = context.user_data.get('changes', [])
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
     tags = get_tags(file_path)
 
     def mark(tag_name): return "✏️" if tag_name in changes else ""
     
-    caption = (
-        f"🎧 **Music Editor Panel**\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📏 Size: `{tags['size']}`\n"
-        f"⏱ Duration: `{tags['duration']}`\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 Artist: `{tags['artist']}` {mark('artist')}\n"
-        f"🎵 Title: `{tags['title']}` {mark('title')}\n"
-        f"💿 Album: `{tags['album']}` {mark('album')}\n"
-        f"🎹 Genre: `{tags['genre']}` {mark('genre')}\n"
-        f"📅 Year: `{tags['year']}` {mark('year')}\n"
-        f"🔢 Track: `{tags.get('track', '0')}` {mark('track')}\n"
-        f"💬 Comment: `{tags.get('comment', '')}` {mark('comment')}\n"
-        f"📝 Lyrics: {'✅ دارد' if tags.get('lyrics') else '❌ ندارد'} {mark('lyrics')}\n"
-        f"🖼 Cover: {'✅ دارد' if tags.get('has_cover') else '❌ ندارد'} {mark('has_cover')}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👇 بخش مورد نظر را انتخاب کنید:"
+    lyrics_stat = get_text(user_id, 'has_it') if tags.get('lyrics') else get_text(user_id, 'doesnt_have_it')
+    cover_stat = get_text(user_id, 'has_it') if tags.get('has_cover') else get_text(user_id, 'doesnt_have_it')
+
+    caption = get_text(user_id, 'editor_panel').format(
+        size=tags['size'], duration=tags['duration'], artist=tags['artist'], mark_artist=mark('artist'),
+        title=tags['title'], mark_title=mark('title'), album=tags['album'], mark_album=mark('album'),
+        genre=tags['genre'], mark_genre=mark('genre'), year=tags['year'], mark_year=mark('year'),
+        track=tags.get('track', '0'), mark_track=mark('track'), comment=tags.get('comment', ''),
+        mark_comment=mark('comment'), lyrics_status=lyrics_stat, mark_lyrics=mark('lyrics'),
+        cover_status=cover_stat, mark_cover=mark('has_cover')
     )
 
     keyboard = [
-        [InlineKeyboardButton("🎵 نام آهنگ", callback_data='edit_title'), InlineKeyboardButton("👤 خواننده", callback_data='edit_artist')],
-        [InlineKeyboardButton("🎹 ژانر", callback_data='edit_genre'), InlineKeyboardButton("💿 آلبوم", callback_data='edit_album')],
-        [InlineKeyboardButton("🔢 شماره ترک", callback_data='edit_track'), InlineKeyboardButton("📅 سال", callback_data='edit_year')],
-        [InlineKeyboardButton("💬 کامنت", callback_data='edit_comment'), InlineKeyboardButton("📝 متن آهنگ", callback_data='edit_lyrics')],
-        [InlineKeyboardButton("🖼 عکس کاور", callback_data='edit_cover'), InlineKeyboardButton("🚀 پیشرفته (VIP)", callback_data='goto_advanced')],
-        [InlineKeyboardButton("❌ لغو", callback_data='cancel'), InlineKeyboardButton("✅ اعمال و آپلود", callback_data='done')]
+        [InlineKeyboardButton(get_text(user_id, 'btn_title'), callback_data='edit_title'), InlineKeyboardButton(get_text(user_id, 'btn_artist'), callback_data='edit_artist')],
+        [InlineKeyboardButton(get_text(user_id, 'btn_genre'), callback_data='edit_genre'), InlineKeyboardButton(get_text(user_id, 'btn_album'), callback_data='edit_album')],
+        [InlineKeyboardButton(get_text(user_id, 'btn_track'), callback_data='edit_track'), InlineKeyboardButton(get_text(user_id, 'btn_year'), callback_data='edit_year')],
+        [InlineKeyboardButton(get_text(user_id, 'btn_comment'), callback_data='edit_comment'), InlineKeyboardButton(get_text(user_id, 'btn_lyrics'), callback_data='edit_lyrics')],
+        [InlineKeyboardButton(get_text(user_id, 'btn_cover'), callback_data='edit_cover'), InlineKeyboardButton(get_text(user_id, 'btn_advanced'), callback_data='goto_advanced')],
+        [InlineKeyboardButton(get_text(user_id, 'btn_cancel'), callback_data='cancel'), InlineKeyboardButton(get_text(user_id, 'btn_done'), callback_data='done')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -153,7 +144,6 @@ async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, is_firs
                 with open(final_photo_path, 'rb') as f:
                     msg = await context.bot.send_photo(chat_id, photo=f, caption=caption, reply_markup=reply_markup, parse_mode='Markdown')
             context.user_data['panel_id'] = msg.message_id
-        
         else:
             try:
                 if is_url:
@@ -176,46 +166,40 @@ async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, is_firs
 
     except Exception as e:
         print(f"Panel Error: {e}")
-
     finally:
         if real_thumb_path and os.path.exists(real_thumb_path):
             try: os.remove(real_thumb_path)
             except: pass
 
-
 async def show_advanced_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     panel_id = context.user_data.get('panel_id')
     current_filename = context.user_data.get('filename')
+    user_id = update.effective_user.id
     
-    caption = (
-        f"🚀 **Advanced Pro Tools**\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📁 فایل فعلی: `{current_filename}`\n"
-        f"🛠 ابزار مورد نظر را انتخاب کنید:\n"
-    )
+    caption = get_text(user_id, 'advanced_panel').format(filename=current_filename)
 
     keyboard = [
         [
-            InlineKeyboardButton("🔄 تبدیل فرمت", callback_data='menu_convert'),
-            InlineKeyboardButton("🧹 پاکسازی حرفه‌ای", callback_data='pro_clean')
+            InlineKeyboardButton(get_text(user_id, 'btn_convert'), callback_data='menu_convert'),
+            InlineKeyboardButton(get_text(user_id, 'btn_clean'), callback_data='pro_clean')
         ],
         [
-            InlineKeyboardButton("✂️ برش آهنگ (Cutter)", callback_data='start_cut'),
-            InlineKeyboardButton("📝 نام‌گذاری استاندارد", callback_data='auto_rename')
+            InlineKeyboardButton(get_text(user_id, 'btn_cut'), callback_data='start_cut'),
+            InlineKeyboardButton(get_text(user_id, 'btn_rename'), callback_data='auto_rename')
         ],
         [
-            InlineKeyboardButton("🔒 قفل تگ‌ها", callback_data='menu_lock'),
-            InlineKeyboardButton("🌐 تشخیص زبان", callback_data='detect_lang')
+            InlineKeyboardButton(get_text(user_id, 'btn_lock'), callback_data='menu_lock'),
+            InlineKeyboardButton(get_text(user_id, 'btn_lang'), callback_data='detect_lang')
         ],
         [
-            InlineKeyboardButton("✏️ تغییر نام فایل", callback_data='edit_filename'),
-            InlineKeyboardButton("📢 مدیریت کانال‌ها (VIP)", callback_data='manage_channels')
+            InlineKeyboardButton(get_text(user_id, 'btn_edit_filename'), callback_data='edit_filename'),
+            InlineKeyboardButton(get_text(user_id, 'btn_channels'), callback_data='manage_channels')
         ],
         [
-            InlineKeyboardButton("🎙 تبدیل به ویس (Voice)", callback_data='convert_to_voice') # 👈 دکمه جدید
+            InlineKeyboardButton(get_text(user_id, 'btn_voice'), callback_data='convert_to_voice')
         ],
         [
-            InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data='goto_main')
+            InlineKeyboardButton(get_text(user_id, 'btn_back'), callback_data='goto_main')
         ]
     ]
     
@@ -229,7 +213,6 @@ async def show_advanced_panel(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     except Exception as e:
         print(f"Advanced Panel Error: {e}")
-
 
 
 async def show_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, mode='view'):
@@ -299,7 +282,7 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
     file_path = context.user_data.get('file_path')
 
     if not file_path and data not in ['goto_main', 'cancel']:
-        await query.answer("❌ ربات ریست شده. آهنگ را دوباره بفرستید.", show_alert=True)
+        await query.answer(get_text(user_id, 'bot_reset'), show_alert=True)
         return ConversationHandler.END
 
     if data == 'goto_advanced':
@@ -317,7 +300,7 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SELECT_ACTION 
 
     if data == 'cancel': 
-        await query.answer("عملیات لغو شد ❌")
+        await query.answer(get_text(user_id, 'op_cancelled'))
         await query.message.delete()
         if file_path and os.path.exists(file_path): 
             try: os.remove(file_path)
@@ -341,11 +324,9 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if data == 'add_new_channel':
         await query.answer()
-        keyboard = [[InlineKeyboardButton("🔙 انصراف", callback_data='mode_view')]] 
+        keyboard = [[InlineKeyboardButton(get_text(user_id, 'btn_back'), callback_data='mode_view')]] 
         msg = await query.message.reply_text(
-            "➕ **افزودن کانال جدید**\n\n"
-            "آیدی کانال را بفرستید (مثل @Channel) یا یک پیام از آن **فوروارد** کنید.\n"
-            "⚠️ ربات باید در آن کانال ادمین باشد.",
+            get_text(user_id, 'add_channel_prompt'),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -361,18 +342,16 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
     if data.startswith('del_ch_'):
         ch_id = data.replace('del_ch_', '')
         delete_channel(user_id, ch_id)
-        await query.answer("🗑 کانال حذف شد.", show_alert=False)
+        await query.answer(get_text(user_id, 'channel_deleted'), show_alert=False)
         await show_channels_menu(update, context, mode='delete') 
         return SELECT_ACTION
-
 
     if data == 'start_cut':
         await query.answer()
         msg = await query.message.reply_text(
-            "✂️ **ابزار برش حرفه‌ای (Cutter)**\n\n"
-            "لطفاً بازه زمانی را بفرستید. مثال: `00:30-01:15` ",
+            get_text(user_id, 'cutter_prompt'),
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data='goto_advanced')]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(get_text(user_id, 'btn_back'), callback_data='goto_advanced')]])
         )
         context.user_data['msg_to_delete'] = msg.message_id
         context.user_data['current_tag'] = 'cut_audio'
@@ -381,9 +360,8 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
     if data == 'menu_convert': await show_convert_menu(update, context); return SELECT_ACTION
     if data == 'menu_lock': await show_lock_menu(update, context); return SELECT_ACTION
 
-
     if data == 'convert_to_voice':
-        await query.answer("⏳ در حال تبدیل به ویس...")
+        await query.answer(get_text(user_id, 'converting_voice'))
         current_path = context.user_data.get('file_path')
         
         voice_path = await asyncio.to_thread(convert_audio, current_path, "ogg", "64k")
@@ -399,17 +377,17 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
             with open(voice_path, 'rb') as f:
                 await query.message.reply_voice(
                     voice=f,
-                    caption="✅ تبدیل به ویس انجام شد."
+                    caption=get_text(user_id, 'voice_done')
                 )
             
             await show_advanced_panel(update, context)
         else:
-            await query.answer("❌ خطا در تبدیل!", show_alert=True)
+            await query.answer(get_text(user_id, 'convert_error'), show_alert=True)
             
         return SELECT_ACTION
 
     if data.startswith('convert_'):
-        await query.answer("⏳ در حال تبدیل فرمت و انتقال تگ‌ها...")
+        await query.answer(get_text(user_id, 'converting_format'))
         target = data.replace('convert_', '')
         
         fmt = 'mp3'
@@ -436,10 +414,10 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
             base_name = os.path.splitext(old_name)[0]
             context.user_data['filename'] = f"{base_name}.{fmt}"
             
-            await query.answer(f"✅ تبدیل به {fmt.upper()} با موفقیت انجام شد!", show_alert=True)
+            await query.answer(get_text(user_id, 'format_done').format(fmt=fmt.upper()), show_alert=True)
             await show_advanced_panel(update, context)
         else:
-            await query.answer("❌ خطا در تبدیل فرمت!", show_alert=True)
+            await query.answer(get_text(user_id, 'convert_error'), show_alert=True)
             
         return SELECT_ACTION
 
@@ -447,9 +425,9 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         locks = context.user_data.get('locked_tags', [])
         success = await asyncio.to_thread(smart_clean_tags, file_path, locks)
         if success:
-            await query.answer("🧹 فایل پاکسازی شد.", show_alert=True)
+            await query.answer(get_text(user_id, 'file_cleaned'), show_alert=True)
         else:
-            await query.answer("❌ خطا در پاکسازی.", show_alert=True)
+            await query.answer(get_text(user_id, 'clean_error'), show_alert=True)
         context.user_data['changes'] = []
         await show_panel(update, context, is_first_time=False)
         return SELECT_ACTION
@@ -467,14 +445,14 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         tags = await asyncio.to_thread(get_tags, file_path)
         new_name = generate_standard_filename(tags)
         context.user_data['filename'] = new_name
-        await query.answer(f"📝 نام جدید: {new_name}", show_alert=True)
+        await query.answer(get_text(user_id, 'new_name').format(name=new_name), show_alert=True)
         await show_advanced_panel(update, context)
         return SELECT_ACTION
 
     if data == 'detect_lang':
         tags = await asyncio.to_thread(get_tags, file_path)
         lang = await asyncio.to_thread(detect_lyrics_lang, tags.get('lyrics'))
-        await query.answer(f"🌐 زبان: {lang}", show_alert=True)
+        await query.answer(get_text(user_id, 'detected_lang').format(lang=lang), show_alert=True)
         return SELECT_ACTION
 
     tag_map = {
@@ -485,16 +463,14 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if data in tag_map:
         context.user_data['current_tag'] = tag_map[data]
-        tag_fa = data.replace('edit_', '').upper()
-        await query.answer(f"👇 مقدار جدید {tag_fa} را بفرستید:", show_alert=False)
+        await query.answer(get_text(user_id, 'send_new_value'), show_alert=False)
         return WAITING_INPUT
 
     if data == 'edit_cover':
-        await query.answer("🖼 عکس کاور را بفرستید 👇", show_alert=False)
+        await query.answer(get_text(user_id, 'send_cover'), show_alert=False)
         return WAITING_COVER
 
     return SELECT_ACTION
-
 
 def _process_cut(path, start_ms, end_ms):
     audio = AudioSegment.from_file(path)
@@ -654,9 +630,9 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         final_id = chat_info.id
         final_title = chat_info.title
         
-        safe_title = final_title.replace('*', '').replace('_', '').replace('`', '')
+        safe_title = final_title.replace('*', '').replace('_', '').replace('`', '').replace('[', '').replace(']', '')
         if add_channel(update.effective_user.id, final_id, final_title):
-            success_text = f"✅ کانال **{final_title}** اضافه شد!"
+            success_text = f"✅ کانال **{safe_title}** اضافه شد!"
         else:
             success_text = "⚠️ این کانال قبلاً در لیست شما وجود دارد."
 
@@ -664,21 +640,18 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.user_data.get('from_settings'):
             from handlers.settings import SETTINGS_MENU 
             
-
             msg = await context.bot.send_message(update.effective_chat.id, success_text, parse_mode='Markdown')
             await asyncio.sleep(2)
             await safe_delete(msg)
             
             context.user_data.pop('from_settings', None)
             
-
             user_id = update.effective_user.id
             panel_id = context.user_data.get('settings_panel_id')
             
             channels = get_user_channels(user_id)
             keyboard = []
             
-
             for ch_id, title, is_selected in channels:
                 status = "✅" if is_selected else "❌"
                 keyboard.append([InlineKeyboardButton(f"{status} {title}", callback_data=f"toggle_ch_set_{ch_id}")])
@@ -694,7 +667,6 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             msg_text = "📢 **مدیریت کانال‌های مقصد (تنظیمات)**\n\n✅ = ارسال می‌شود\n❌ = ارسال نمی‌شود"
 
-
             if panel_id:
                 try:
                     await context.bot.edit_message_text(
@@ -704,7 +676,9 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         reply_markup=InlineKeyboardMarkup(keyboard),
                         parse_mode='Markdown'
                     )
-                except:
+                except BadRequest:
+                    pass
+                except Exception:
                     new_msg = await context.bot.send_message(user_id, msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
                     context.user_data['settings_panel_id'] = new_msg.message_id
             
@@ -721,10 +695,8 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:     
         err_msg = await update.message.reply_text(f"❌ {e}")
         await asyncio.sleep(4)
-        try: await err_msg.delete()
-        except: pass
+        await safe_delete(err_msg)
         
-
         if context.user_data.get('from_settings'):
             from handlers.settings import WAITING_SETTINGS_CHANNEL
             return WAITING_SETTINGS_CHANNEL
@@ -733,23 +705,20 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer("در حال آپلود نهایی... 📤")
+    user_id = update.effective_user.id
+    await query.answer(get_text(user_id, 'uploading'))
     
     file_path = context.user_data.get('file_path')
     is_voice = context.user_data.get('is_voice', False)
     display_filename = context.user_data.get('filename', 'music.mp3')
-    user_id = update.effective_user.id
 
     selected_channels = get_selected_channels(user_id)
-    
     tags = get_tags(file_path)
     
-    report_text = (
-        f"🚀 **عملیات با موفقیت به پایان رسید!**\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📂 فایل نهایی: `{display_filename}`\n"
-        f"📏 حجم: `{tags['size']}`\n"
-        f"⏱ زمان: `{tags['duration']}`\n"
+    report_text = get_text(user_id, 'report_header').format(
+        filename=display_filename,
+        size=tags['size'],
+        duration=tags['duration']
     )
 
     thumb_path = None
@@ -775,7 +744,7 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_voice:
                 sent_audio = await query.message.reply_voice(
                     voice=audio_file,
-                    caption=f"✅ ویس شما آماده شد.\n🤖 @NavaTagbot"
+                    caption=get_text(user_id, 'voice_caption')
                 )
                 if selected_channels:
                     for ch_id in selected_channels:
@@ -788,7 +757,7 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sent_audio = await query.message.reply_audio(
                     audio=audio_file,
                     filename=display_filename,
-                    caption=f"✅ فایل شما آماده شد.\n🤖 @NavaTagbot",
+                    caption=get_text(user_id, 'audio_caption'),
                     thumbnail=thumb_file,
                     parse_mode='Markdown'
                 )
@@ -818,21 +787,19 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_voice:
             file_id = sent_audio.voice.file_id
             query_data = f"voice:{file_id}"
-            
         else:
             file_id = sent_audio.audio.file_id
-            
             if file_path.lower().endswith(".mp3"):
                 query_data = f"audio:{file_id}"
-            
             else:
                 query_data = f"{file_id}"
 
-        keyboard.append([InlineKeyboardButton("🚀 ارسال برای دوستان", switch_inline_query=query_data)])
+        keyboard.append([InlineKeyboardButton(get_text(user_id, 'share_btn'), switch_inline_query=query_data)])
+        
     if selected_channels:
-        report_text += f"✅ ارسال به **{sent_count}** کانال انجام شد.\n"
+        report_text += get_text(user_id, 'sent_to_channels').format(count=sent_count)
 
-    report_text += f"\n✨ از اینکه از ما استفاده کردید متشکریم!"
+    report_text += get_text(user_id, 'thanks')
 
     await query.message.reply_text(
         report_text, 
@@ -847,9 +814,7 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
     
     context.user_data.clear()
-    
     return ConversationHandler.END
-
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query
     if not query: return
@@ -907,17 +872,18 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = context.user_data.get('file_path')
+    user_id = update.effective_user.id
 
     if file_path:
         cleanup_all_files(file_path)
 
     context.user_data.clear()
 
-    msg_text = "❌ عملیات لغو شد و تمام فایل‌های موقت پاکسازی گردیدند."
+    msg_text = get_text(user_id, 'cancelled_cleanup')
 
     try:
         if update.callback_query:
-            await update.callback_query.answer("لغو شد")
+            await update.callback_query.answer()
             await update.callback_query.edit_message_caption(
                 caption=msg_text,
                 reply_markup=None 
@@ -929,13 +895,13 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     return ConversationHandler.END
-
 async def handle_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("⏰ Timeout triggered inside function!") 
 
     chat_id = context.user_data.get('chat_id')
     panel_id = context.user_data.get('panel_id')
     file_path = context.user_data.get('file_path')
+    user_id = update.effective_user.id if update.effective_user else None
 
     if not chat_id and update.effective_chat:
         chat_id = update.effective_chat.id
@@ -949,13 +915,8 @@ async def handle_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass 
 
-    if chat_id:
-        msg_text = (
-            "⏰ **نشست ویرایش منقضی شد!**\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ جهت بهینه‌سازی سرور، فایل موقت و پنل ویرایش شما حذف گردید.\n\n"
-            "♻️ **برای شروع مجدد، آهنگ یا ویس خود را دوباره ارسال کنید.**"
-        )
+    if chat_id and user_id:
+        msg_text = get_text(user_id, 'timeout_msg')
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -966,9 +927,7 @@ async def handle_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     context.user_data.clear()
-    
     return ConversationHandler.END
-
 
 async def show_lock_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     panel_id = context.user_data.get('panel_id')
@@ -1034,7 +993,7 @@ async def show_convert_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    status_msg = await update.message.reply_text("⚡️ **ویرایش سریع فعال است...**\nدر حال ارسال فایل نهایی 📤")
+    status_msg = await update.message.reply_text(get_text(user_id, 'fast_mode_active'))
     
     file_path = context.user_data.get('file_path')
     display_filename = context.user_data.get('filename', 'music.mp3')
@@ -1062,18 +1021,16 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
         with open(file_path, 'rb') as audio_file:
             thumb_file = open(thumb_path, 'rb') if thumb_path and os.path.exists(thumb_path) else None
             
-
             await context.bot.send_audio(
                 chat_id=update.effective_chat.id,
                 audio=audio_file,
                 filename=display_filename,
-                caption=f"✅ فایل شما آماده شد (ویرایش سریع).\n🤖 @NavaTagbot",
+                caption=get_text(user_id, 'fast_audio_caption'),
                 thumbnail=thumb_file, 
                 title=context.user_data.get('title', ''), 
                 performer=context.user_data.get('artist', '') 
             )
             
-
             if selected_channels:
                 for ch_id in selected_channels:
                     try:
@@ -1085,7 +1042,7 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
                             audio=audio_file,
                             filename=display_filename,
                             thumbnail=thumb_file,
-                            caption=f"🎧 @NavaTagbot" 
+                            caption=get_text(user_id, 'channel_caption') 
                         )
                         sent_count += 1
                     except Exception as e:
@@ -1094,10 +1051,10 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
             if thumb_file: thumb_file.close()
             
             if sent_count > 0:
-                await update.message.reply_text(f"🚀 فایل همزمان به **{sent_count}** کانال شما ارسال شد.")
+                await update.message.reply_text(get_text(user_id, 'fast_sent_channels').format(count=sent_count))
             
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در ارسال: {e}")
+        await update.message.reply_text(get_text(user_id, 'send_error').format(e=e))
 
     if thumb_path and os.path.exists(thumb_path): 
         try: os.remove(thumb_path)
@@ -1107,7 +1064,6 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
     try: await status_msg.delete()
     except: pass
     context.user_data.clear()
-
 def get_thumb_path(file_path):
     from mutagen.mp3 import MP3
     from mutagen.id3 import ID3, APIC
