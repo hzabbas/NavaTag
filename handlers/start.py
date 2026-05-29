@@ -10,7 +10,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE , edit=False)
     keyboard = [
         [
             InlineKeyboardButton("🎵 راهنما", callback_data='help'),
-            InlineKeyboardButton("📢 کانال ما", url='https://t.me/YourChannel')
+            InlineKeyboardButton("📢 کانال ما", url='https://t.me/VoidSuspended')
         ],
         [
              InlineKeyboardButton("⚙️ تنظیمات شخصی (جدید)", callback_data='open_settings') 
@@ -22,13 +22,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE , edit=False)
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     welcome_text = (
-        f"سلام {user.first_name} عزیز! 👋\n\n"
-        "🎧 من ربات **ویرایشگر تگ موزیک** هستم.\n"
-        "می‌تونی فایل‌های MP3 خودت رو برام بفرستی تا:\n\n"
-        "✨ نام خواننده و آهنگ رو تغییر بدم\n"
-        "🖼 کاور آهنگ رو عوض کنم\n"
-        "📅 سال انتشار و آلبوم رو تنظیم کنم\n\n"
-        "👇 برای شروع، همین الان یه فایل آهنگ بفرست!"
+        f"درود {user.first_name}، به **NavaTag** خوش آمدید. 🌑\n\n"
+        "اینجا، ابزاری دقیق برای مدیریت متادیتای فایل‌های صوتی شماست.\n"
+        "قابلیت‌هایی که در اختیار دارید:\n\n"
+        "• ویرایش کامل تگ‌های ID3 (عنوان، هنرمند، آلبوم و...)\n"
+        "• مدیریت متمرکز کاور آرت و متن آهنگ (Lyrics)\n"
+        "• ابزارهای پیشرفته مانند برش صوتی، تبدیل فرمت و نام‌گذاری استاندارد\n\n"
+        "📂 فایل صوتی خود را جهت شروع فرآیند ارسال کنید."
     )
 
     if edit and update.callback_query:

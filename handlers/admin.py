@@ -172,9 +172,9 @@ async def set_lock_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_chat_id = None
     
 
-    if msg.forward_from_chat:
-        if msg.forward_from_chat.type == 'channel':
-            target_chat_id = msg.forward_from_chat.id
+    if msg.forward_origin:
+        if msg.forward_origin.type == 'channel':
+            target_chat_id = msg.forward_origin.chat.id
         else:
             temp = await context.bot.send_message(chat_id, "❌ این پیام از کانال نیست!")
             await asyncio.sleep(3)
@@ -215,7 +215,7 @@ async def set_lock_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await context.bot.delete_message(chat_id, instruct_id)
             except: pass
             context.user_data['lock_instruction_msg_id'] = None
-     
+        safe_title = chat_info.title.replace('*', '').replace('_', '').replace('`', '')
         success = await context.bot.send_message(
             chat_id,
             f"✅ کانال **{chat_info.title}** به لیست قفل اضافه شد.",

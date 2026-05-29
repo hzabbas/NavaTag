@@ -627,9 +627,9 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     channel_title = "Unknown Channel"
 
 
-    if update.message.forward_from_chat and update.message.forward_from_chat.type == 'channel':
-        channel_id = update.message.forward_from_chat.id
-        channel_title = update.message.forward_from_chat.title
+    if update.message.forward_origin and update.message.forward_origin.type == 'channel':
+        channel_id = update.message.forward_origin.chat.id
+        channel_title = update.message.forward_origin.chat.title
     elif update.message.text:
         channel_id = update.message.text.strip()
 
@@ -661,7 +661,7 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         final_id = chat_info.id
         final_title = chat_info.title
         
-
+        safe_title = final_title.replace('*', '').replace('_', '').replace('`', '')
         if add_channel(update.effective_user.id, final_id, final_title):
             success_text = f"✅ کانال **{final_title}** اضافه شد!"
         else:
