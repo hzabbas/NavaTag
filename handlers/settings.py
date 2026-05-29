@@ -1,17 +1,26 @@
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.error import BadRequest
+
 from database.user_service import (
     get_selected_channels, set_fast_mode, get_fast_mode, 
-    set_user_preset, get_user_presets, delete_user_preset , 
-    get_user_channels ,
-    toggle_channel_selection , 
-    delete_channel
+    set_user_preset, get_user_presets, delete_user_preset, 
+    get_user_channels, toggle_channel_selection, delete_channel
 )
-import asyncio
 from handlers.start import start
 
-
 SETTINGS_MENU, WAITING_PRESET_VALUE, WAITING_SETTINGS_CHANNEL = range(3)
+
+async def safe_delete(message):
+    if not message:
+        return
+    try:
+        await message.delete()
+    except BadRequest:
+        pass
+    except Exception as e:
+        print(f"Delete Error: {e}")
 
 def get_settings_keyboard(user_id):
     is_fast = get_fast_mode(user_id)
@@ -28,11 +37,8 @@ def get_settings_keyboard(user_id):
 
     keyboard = [
         [InlineKeyboardButton(f"⚡️ حالت ویرایش سریع: {fast_icon}", callback_data='toggle_fast_mode')],
-        
         [InlineKeyboardButton(f"📢 ارسال خودکار به کانال: {ch_status}", callback_data='manage_channels_settings')],
-        
         [InlineKeyboardButton("🛠 تنظیمات تگ‌های ثابت (قفل) 🛠", callback_data='ignore')],
-        
         [
             InlineKeyboardButton(f"👤 خواننده: {tag_status('artist')}", callback_data='set_preset_artist'),
             InlineKeyboardButton(f"🎵 آلبوم: {tag_status('album')}", callback_data='set_preset_album')
@@ -57,24 +63,20 @@ async def settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1️⃣ **ویرایش سریع:** اگر روشن باشد، آهنگ بلافاصله با تگ‌های شما ادیت و ارسال می‌شود (بدون نمایش پنل).\n"
         "2️⃣ **تگ‌های ثابت:** مقادیری که همیشه روی آهنگ‌های شما تنظیم شوند (مثل نام خودتان به عنوان آرتیست)."
     )
-    
 
     if update.callback_query:
         await update.callback_query.answer()
-
-        msg = await update.callback_query.edit_message_text(
-            text=msg_text,
-            reply_markup=get_settings_keyboard(user_id),
-            parse_mode='Markdown'
-        )
-        context.user_data['settings_panel_id'] = msg.message_id
-        
-
+        try:
+            msg = await update.callback_query.edit_message_text(
+                text=msg_text,
+                reply_markup=get_settings_keyboard(user_id),
+                parse_mode='Markdown'
+            )
+            context.user_data['settings_panel_id'] = msg.message_id
+        except BadRequest:
+            pass
     else:
-
-        try: await update.message.delete()
-        except: pass
-        
+        await safe_delete(update.message)
         msg = await update.message.reply_text(
             text=msg_text,
             reply_markup=get_settings_keyboard(user_id),
@@ -106,17 +108,14 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_settings_channels(update, context, mode='delete')
         return SETTINGS_MENU
 
-
     if data == 'mode_delete_settings':
         await show_settings_channels(update, context, mode='delete')
         return SETTINGS_MENU
-
 
     if data == 'mode_view_settings':
         await show_settings_channels(update, context, mode='view')
         return SETTINGS_MENU
         
-   
     if data == 'add_new_channel_settings':
         await query.answer()
         context.user_data['from_settings'] = True
@@ -133,7 +132,6 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return WAITING_SETTINGS_CHANNEL 
-
 
     if data == 'back_to_main_settings':
         await query.edit_message_text(
@@ -157,7 +155,10 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current = get_fast_mode(user_id)
         set_fast_mode(user_id, not current)
         await query.answer(f"ویرایش سریع {'فعال' if not current else 'غیرفعال'} شد")
-        await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
+        try:
+            await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
+        except BadRequest:
+            pass
         return SETTINGS_MENU
 
     if data.startswith('set_preset_'):
@@ -188,15 +189,13 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return SETTINGS_MENU
-    
 
 async def receive_preset_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     tag = context.user_data.get('target_preset')
     chat_id = update.effective_chat.id
     
-    try: await update.message.delete()
-    except: pass
+    await safe_delete(update.message)
 
     status_text = ""
 
@@ -206,18 +205,15 @@ async def receive_preset_value(update: Update, context: ContextTypes.DEFAULT_TYP
         if text.lower() == 'del':
             delete_user_preset(user_id, tag if tag != 'cover' else 'has_cover')
             status_text = f"🗑 قفل تگ {tag} برداشته شد."
-        
-
         elif tag == 'year':
             if not text.isdigit() or len(text) != 4:
                 err = await context.bot.send_message(chat_id, "⚠️ خطا: سال باید فقط عدد و ۴ رقمی باشد (مثلاً 2024)")
                 await asyncio.sleep(3)
-                await err.delete()
+                await safe_delete(err)
                 return WAITING_PRESET_VALUE 
             else:
                 set_user_preset(user_id, tag, text)
                 status_text = f"✅ تگ {tag} روی `{text}` قفل شد."
-        
         else:
             set_user_preset(user_id, tag, text)
             status_text = f"✅ تگ {tag} روی `{text}` قفل شد."
@@ -228,21 +224,23 @@ async def receive_preset_value(update: Update, context: ContextTypes.DEFAULT_TYP
         status_text = "✅ عکس کاور ثابت ذخیره شد."
 
     panel_id = context.user_data.get('settings_panel_id')
+    final_text = f"{status_text}\n\n⚙️ **تنظیمات شخصی شما**"
     
     if panel_id:
         try:
-
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=panel_id,
-                text=f"{status_text}\n\n⚙️ **تنظیمات شخصی شما**",
+                text=final_text,
                 reply_markup=get_settings_keyboard(user_id),
                 parse_mode='Markdown'
             )
-        except Exception as e:
+        except BadRequest:
+            pass
+        except Exception:
             new_msg = await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"{status_text}\n\n⚙️ **تنظیمات شخصی شما**",
+                text=final_text,
                 reply_markup=get_settings_keyboard(user_id),
                 parse_mode='Markdown'
             )
@@ -250,7 +248,7 @@ async def receive_preset_value(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         new_msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"{status_text}\n\n⚙️ **تنظیمات شخصی شما**",
+            text=final_text,
             reply_markup=get_settings_keyboard(user_id),
             parse_mode='Markdown'
         )
@@ -297,6 +295,7 @@ async def show_settings_channels(update: Update, context: ContextTypes.DEFAULT_T
              await query.edit_message_caption(caption=msg_text, reply_markup=reply_markup, parse_mode='Markdown')
         else:
              await query.edit_message_text(text=msg_text, reply_markup=reply_markup, parse_mode='Markdown')
+    except BadRequest:
+        pass
     except Exception:
-        user_id = update.effective_chat.id
         await context.bot.send_message(user_id, msg_text, reply_markup=reply_markup, parse_mode='Markdown')

@@ -1,49 +1,51 @@
-from multiprocessing import context
 import os
 import asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup , InputMediaPhoto , InlineQueryResultCachedAudio, InlineQueryResultCachedVoice , InlineQueryResultCachedDocument
+import random
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, 
+    InputMediaPhoto, InlineQueryResultCachedAudio, 
+    InlineQueryResultCachedVoice, InlineQueryResultCachedDocument
+)
 from telegram.ext import ContextTypes, ConversationHandler
+from telegram.error import BadRequest
+from pydub import AudioSegment
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC
+
 from config import Config
-from pydub import AudioSegment
 from database.user_service import (
-    add_channel, 
-    get_user_channels, 
-    toggle_channel_selection, 
-    delete_channel, 
-    get_selected_channels ,
-    get_user_presets, get_fast_mode
+    add_channel, get_user_channels, toggle_channel_selection, 
+    delete_channel, get_selected_channels, get_user_presets, get_fast_mode
 )
-from telegram import InlineQueryResultCachedAudio
 from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
-from utils.tagger import get_tags, set_tag, set_cover_from_file, delete_all_tags , apply_tags
+from utils.tagger import get_tags, set_tag, set_cover_from_file, delete_all_tags, apply_tags
 from utils.pro_tools import convert_audio, detect_lyrics_lang, generate_standard_filename, smart_clean_tags
-try:
-    from utils.pro_tools import convert_audio, detect_lyrics_lang, generate_standard_filename, smart_clean_tags
-except ImportError:
-    pass
 
-
+async def safe_delete(message):
+    if not message:
+        return
+    try:
+        await message.delete()
+    except BadRequest:
+        pass
+    except Exception as e:
+        print(f"Delete Error: {e}")
 
 def cleanup_all_files(file_path):
-    if not file_path: return
+    if not file_path:
+        return
     
     base_path = os.path.splitext(file_path)[0]
-    
     extensions = ['.mp3', '.ogg', '.wav', '.flac', '.jpg', '.png']
     
     for ext in extensions:
         target = base_path + ext
-        if os.path.exists(target):
-            try:
+        try:
+            if os.path.exists(target):
                 os.remove(target)
-                print(f"🧹 Deleted: {target}")
-            except Exception as e:
-                print(f"⚠️ Error deleting {target}: {e}")
-
-
-
+        except OSError as e:
+            print(f"Cleanup Error ({target}): {e}")
+            
 async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     msg = await update.message.reply_text("⏳ در حال دانلود و بررسی تنظیمات...")
@@ -83,8 +85,7 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"Error setting preset cover: {e}")
 
-    try: await msg.delete()
-    except: pass
+    await safe_delete(msg)
 
 
     if get_fast_mode(user_id):
@@ -383,15 +384,14 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if data == 'convert_to_voice':
         await query.answer("⏳ در حال تبدیل به ویس...")
-        
         current_path = context.user_data.get('file_path')
         
-        voice_path = convert_audio(current_path, "ogg", bitrate="64k")
+        voice_path = await asyncio.to_thread(convert_audio, current_path, "ogg", "64k")
         
         if voice_path:
             if current_path != voice_path and os.path.exists(current_path):
                 try: os.remove(current_path)
-                except: pass
+                except OSError: pass
             
             context.user_data['file_path'] = voice_path
             context.user_data['is_voice'] = True
@@ -410,7 +410,6 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if data.startswith('convert_'):
         await query.answer("⏳ در حال تبدیل فرمت و انتقال تگ‌ها...")
-        
         target = data.replace('convert_', '')
         
         fmt = 'mp3'
@@ -420,17 +419,16 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         elif target == 'wav': fmt = 'wav' 
         elif target == 'ogg': fmt = 'ogg'; bitrate = '128k'
 
-        old_tags = get_tags(file_path) 
-        
-        new_path = convert_audio(file_path, fmt, bitrate)
+        old_tags = await asyncio.to_thread(get_tags, file_path) 
+        new_path = await asyncio.to_thread(convert_audio, file_path, fmt, bitrate)
         
         if new_path:
             if os.path.exists(file_path) and file_path != new_path:
                 try: os.remove(file_path)
-                except: pass
+                except OSError: pass
             
             if fmt != 'wav':
-                apply_tags(new_path, old_tags)
+                await asyncio.to_thread(apply_tags, new_path, old_tags)
             
             context.user_data['file_path'] = new_path
             
@@ -444,11 +442,11 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.answer("❌ خطا در تبدیل فرمت!", show_alert=True)
             
         return SELECT_ACTION
-    
 
     if data == 'pro_clean':
         locks = context.user_data.get('locked_tags', [])
-        if smart_clean_tags(file_path, locked_tags=locks):
+        success = await asyncio.to_thread(smart_clean_tags, file_path, locks)
+        if success:
             await query.answer("🧹 فایل پاکسازی شد.", show_alert=True)
         else:
             await query.answer("❌ خطا در پاکسازی.", show_alert=True)
@@ -466,7 +464,7 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SELECT_ACTION
 
     if data == 'auto_rename':
-        tags = get_tags(file_path)
+        tags = await asyncio.to_thread(get_tags, file_path)
         new_name = generate_standard_filename(tags)
         context.user_data['filename'] = new_name
         await query.answer(f"📝 نام جدید: {new_name}", show_alert=True)
@@ -474,8 +472,8 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SELECT_ACTION
 
     if data == 'detect_lang':
-        tags = get_tags(file_path)
-        lang = detect_lyrics_lang(tags.get('lyrics'))
+        tags = await asyncio.to_thread(get_tags, file_path)
+        lang = await asyncio.to_thread(detect_lyrics_lang, tags.get('lyrics'))
         await query.answer(f"🌐 زبان: {lang}", show_alert=True)
         return SELECT_ACTION
 
@@ -497,6 +495,14 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     return SELECT_ACTION
 
+
+def _process_cut(path, start_ms, end_ms):
+    audio = AudioSegment.from_file(path)
+    if end_ms > len(audio) or start_ms >= end_ms:
+        raise ValueError("Invalid range")
+    cut_part = audio[start_ms:end_ms]
+    cut_part.export(path, format="mp3")
+
 async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_text = update.message.text.strip()
     tag_to_edit = context.user_data.get('current_tag')
@@ -513,10 +519,10 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         old_msg_id = context.user_data.get('msg_to_delete')
         if old_msg_id:
             try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_msg_id)
-            except: pass
+            except BadRequest: pass
 
         try: await update.message.delete()
-        except: pass
+        except BadRequest: pass
 
         try:
             start_str, end_str = text.split('-')
@@ -528,40 +534,30 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             end_ms = get_ms(end_str)
 
             file_path = context.user_data.get('file_path')
-            audio = AudioSegment.from_file(file_path)
             
-            if end_ms > len(audio) or start_ms >= end_ms:
-                err = await update.message.reply_text("❌ بازه نامعتبر! دوباره بفرستید.")
-                context.user_data['msg_to_delete'] = err.message_id
-                return WAITING_INPUT
-
             status_msg = await update.message.reply_text("⏳ در حال برش...")
             
-            cut_part = audio[start_ms:end_ms]
-            cut_part.export(file_path, format="mp3")
+            await asyncio.to_thread(_process_cut, file_path, start_ms, end_ms)
 
-            await status_msg.delete()
+            await safe_delete(status_msg)
             temp_ok = await update.message.reply_text("✅ برش با موفقیت انجام شد!")
             
             await asyncio.sleep(2)
-            try: await temp_ok.delete()
-            except: pass
+            await safe_delete(temp_ok)
 
             await show_advanced_panel(update, context)
             return SELECT_ACTION
 
-        except Exception as e:
-            err = await update.message.reply_text("❌ خطا در فرمت! دوباره تلاش کنید.")
+        except Exception:
+            err = await update.message.reply_text("❌ خطا در فرمت یا بازه نامعتبر! دوباره تلاش کنید.")
             context.user_data['msg_to_delete'] = err.message_id
-            return WAITING_INPUT
-        
+            return WAITING_INPUT     
     if tag_to_edit == 'filename':
         if not new_text.lower().endswith(".mp3"): new_text += ".mp3"
         context.user_data['filename'] = new_text
         msg = await update.message.reply_text(f"✅ نام فایل شد: {new_text}")
         await asyncio.sleep(2)
-        try: await msg.delete()
-        except: pass
+        await safe_delete(msg)
         await show_advanced_panel(update, context)
         return SELECT_ACTION
 
@@ -580,8 +576,7 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         msg = await update.message.reply_text(formatted_error, parse_mode='Markdown')
         await asyncio.sleep(4)
-        try: await msg.delete()
-        except: pass
+        await safe_delete(msg)
         return WAITING_INPUT
 
     success = set_tag(file_path, tag_to_edit, new_text)
@@ -593,8 +588,7 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         msg = await update.message.reply_text("❌ خطا در ویرایش.")
         await asyncio.sleep(3)
-        try: await msg.delete()
-        except: pass
+        await safe_delete(msg)
 
     return SELECT_ACTION
 
@@ -617,8 +611,7 @@ async def receive_cover(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_panel(update, context)
         msg = await update.message.reply_text("✅ کاور تغییر کرد!")
         await asyncio.sleep(3)
-        try: await msg.delete()
-        except: pass
+        await safe_delete(msg)
 
     return SELECT_ACTION
 
@@ -674,8 +667,7 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             msg = await context.bot.send_message(update.effective_chat.id, success_text, parse_mode='Markdown')
             await asyncio.sleep(2)
-            try: await msg.delete()
-            except: pass
+            await safe_delete(msg)
             
             context.user_data.pop('from_settings', None)
             
@@ -721,8 +713,7 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             msg = await update.message.reply_text(success_text, parse_mode='Markdown')
             await asyncio.sleep(2)
-            try: await msg.delete()
-            except: pass
+            await safe_delete(msg)
 
             await show_advanced_panel(update, context) 
             return SELECT_ACTION
@@ -784,7 +775,7 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_voice:
                 sent_audio = await query.message.reply_voice(
                     voice=audio_file,
-                    caption=f"✅ ویس شما آماده شد.\n🤖 @YourBotName"
+                    caption=f"✅ ویس شما آماده شد.\n🤖 @NavaTagbot"
                 )
                 if selected_channels:
                     for ch_id in selected_channels:
@@ -797,7 +788,7 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sent_audio = await query.message.reply_audio(
                     audio=audio_file,
                     filename=display_filename,
-                    caption=f"✅ فایل شما آماده شد.\n🤖 @YourBotName",
+                    caption=f"✅ فایل شما آماده شد.\n🤖 @NavaTagbot",
                     thumbnail=thumb_file,
                     parse_mode='Markdown'
                 )
@@ -1076,7 +1067,7 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
                 chat_id=update.effective_chat.id,
                 audio=audio_file,
                 filename=display_filename,
-                caption=f"✅ فایل شما آماده شد (ویرایش سریع).\n🤖 @YourBotName",
+                caption=f"✅ فایل شما آماده شد (ویرایش سریع).\n🤖 @NavaTagbot",
                 thumbnail=thumb_file, 
                 title=context.user_data.get('title', ''), 
                 performer=context.user_data.get('artist', '') 
@@ -1094,7 +1085,7 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
                             audio=audio_file,
                             filename=display_filename,
                             thumbnail=thumb_file,
-                            caption=f"🎧 @YourBotName" 
+                            caption=f"🎧 @NavaTagbot" 
                         )
                         sent_count += 1
                     except Exception as e:

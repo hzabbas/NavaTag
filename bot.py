@@ -73,38 +73,37 @@ async def global_button_handler(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer("⚠️ این نشست منقضی شده است.", show_alert=True)
 
-async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def get_unjoined_channels(user_id, context):
     locked_channels = get_locked_channels()
-    
     if not locked_channels:
-        return True
-
-    not_joined_channels = []
+        return []
     
+    not_joined = []
     for ch_id, title, link in locked_channels:
         try:
             member = await context.bot.get_chat_member(chat_id=ch_id, user_id=user_id)
             if member.status in ['left', 'kicked']:
-                not_joined_channels.append((title, link))
-        except:
-            not_joined_channels.append((title, link))
+                not_joined.append((title, link))
+        except Exception:
+            not_joined.append((title, link))
+    return not_joined
 
-    if not not_joined_channels:
-        return True
-    
-  
+def build_lock_keyboard(unjoined_channels):
     keyboard = []
-    for title, link in not_joined_channels:
-    
+    for title, link in unjoined_channels:
         display_title = title if len(title) < 25 else title[:22] + "..."
         keyboard.append([InlineKeyboardButton(f"📣 {display_title}", url=link)])
-    
- 
     keyboard.append([InlineKeyboardButton("🔄 بررسی عضویت", callback_data="check_join_status")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(keyboard)
 
-
+async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    unjoined = await get_unjoined_channels(user_id, context)
+    
+    if not unjoined:
+        return True
+        
+    reply_markup = build_lock_keyboard(unjoined)
     msg_text = (
         "🔒 **دسترسی محدود شده است**\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
@@ -112,11 +111,11 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ **به محض عضویت، این پیام خودکار محو می‌شود.**"
     )
 
-
     if update.callback_query:
         try:
             await update.callback_query.edit_message_text(text=msg_text, reply_markup=reply_markup, parse_mode='Markdown')
-        except: pass
+        except Exception: 
+            pass
     elif update.message:
         msg = await context.bot.send_message(chat_id=user_id, text=msg_text, reply_markup=reply_markup, parse_mode='Markdown')
         context.bot_data[f"lock_msg_{user_id}"] = msg.message_id
@@ -125,19 +124,17 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    
-
     is_fully_joined = await check_membership(update, context)
 
     if is_fully_joined:
-
         await query.answer("✅ عضویت تایید شد! خوش آمدید.", show_alert=True)
-        try: await query.message.delete() 
-        except: pass
+        try: 
+            await query.message.delete() 
+        except Exception: 
+            pass
         await context.bot.send_message(update.effective_chat.id, "🎉 حالا می‌تونی آهنگت رو بفرستی!")
     else:
         await query.answer("❌ هنوز در تمام کانال‌ها عضو نشده‌اید!", show_alert=True)
-
 
 async def protected_start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
@@ -146,7 +143,8 @@ async def protected_start_editor(update: Update, context: ContextTypes.DEFAULT_T
 
 async def auto_check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.chat_member
-    if not result: return
+    if not result: 
+        return
 
     user_id = result.from_user.id
     new_status = result.new_chat_member.status
@@ -154,41 +152,25 @@ async def auto_check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if new_status not in ['member', 'administrator', 'creator']:
         return
 
-    locked_channels = get_locked_channels()
-    not_joined_channels = []
-    
-    for ch_id, title, link in locked_channels:
-        try:
-            member = await context.bot.get_chat_member(chat_id=ch_id, user_id=user_id)
-            if member.status in ['left', 'kicked']:
-                not_joined_channels.append((title, link))
-        except:
-            not_joined_channels.append((title, link))
-
     lock_msg_id = context.bot_data.get(f"lock_msg_{user_id}")
-    if not lock_msg_id: return 
+    if not lock_msg_id: 
+        return 
 
-    if not not_joined_channels:
+    unjoined = await get_unjoined_channels(user_id, context)
+
+    if not unjoined:
         try:
             await context.bot.delete_message(chat_id=user_id, message_id=lock_msg_id)
             del context.bot_data[f"lock_msg_{user_id}"] 
-        except: pass
+        except Exception: 
+            pass
         
-        success_msg = await context.bot.send_message(
+        await context.bot.send_message(
             chat_id=user_id, 
             text="🎉 **عضویت شما تایید شد!**\nاکنون می‌توانید فایل خود را ارسال کنید. 🎧",
             parse_mode='Markdown'
         )
-
-    
     else:
-        keyboard = []
-        for title, link in not_joined_channels:
-            display_title = title if len(title) < 25 else title[:22] + "..."
-            keyboard.append([InlineKeyboardButton(f"📣 {display_title}", url=link)])
-        
-        keyboard.append([InlineKeyboardButton("🔄 بررسی عضویت", callback_data="check_join_status")])
-        
         try:
             await context.bot.edit_message_text(
                 chat_id=user_id,
@@ -200,12 +182,11 @@ async def auto_check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "لطفاً در کانال‌های باقی‌مانده نیز عضو شوید:\n\n"
                     "✅ **به محض تکمیل، قفل باز می‌شود.**"
                 ),
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_markup=build_lock_keyboard(unjoined),
                 parse_mode='Markdown'
             )
-        except: pass
-
-
+        except Exception: 
+            pass
 def main():
     print("Initializing database and clearing downloads...")
     initialize_database()
