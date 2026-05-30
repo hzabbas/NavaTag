@@ -69,7 +69,6 @@ MESSAGES = {
         'detected_lang': "🌐 زبان: {lang}",
         'send_new_value': "👇 مقدار جدید را بفرستید:",
         'send_cover': "🖼 عکس کاور را بفرستید 👇",
-        
         'uploading': "در حال آپلود نهایی... 📤",
         'report_header': "🚀 **عملیات با موفقیت به پایان رسید!**\n━━━━━━━━━━━━━━━━━━━━\n\n📂 فایل نهایی: `{filename}`\n📏 حجم: `{size}`\n⏱ زمان: `{duration}`\n",
         'voice_caption': "✅ ویس شما آماده شد.\n🤖 @NavaTagbot",
@@ -86,7 +85,15 @@ MESSAGES = {
         'cancelled_cleanup': "❌ عملیات لغو شد و تمام فایل‌های موقت پاکسازی گردیدند.",
         'help_text': "🎵 **راهنمای استفاده از نواتگ**\n\n۱. ابتدا یک فایل صوتی (آهنگ یا ویس) بفرستید.\n۲. از منوی شیشه‌ای، تگ مورد نظر (کاور، نام، خواننده و...) را انتخاب کنید.\n۳. مقدار جدید را بفرستید.\n۴. در نهایت دکمه **✅ اعمال و آپلود** را بزنید.\n\n⚡️ **نکته:** از منوی **تنظیمات** می‌توانید تگ‌های ثابت (مثل اسم کانالتان) را تنظیم کنید تا نیازی نباشد هر بار آن‌ها را وارد کنید.",
         'support_text': "👨‍💻 **پشتیبانی و ارتباط با ما**\n\nبرای گزارش مشکل، پیشنهاد امکانات جدید یا ارتباط با توسعه‌دهنده، به آیدی زیر پیام دهید:\n\n👤 @A_HZ81",
-        'back_to_start': "🔙 بازگشت به منوی اصلی"
+        'back_to_start': "🔙 بازگشت به منوی اصلی",
+        'yt_fetching': "⏳ در حال دریافت اطلاعات ویدیو...",
+        'yt_panel': "🎬 **اطلاعات ویدیو**\n━━━━━━━━━━━━━━━━━━━━\n📌 عنوان: `{title}`\n👤 کانال: `{channel}`\n⏱ زمان: `{duration}`\n👁 بازدید: `{views:,}`\n━━━━━━━━━━━━━━━━━━━━\n👇 کیفیت و عملیات مورد نظر را انتخاب کنید:",
+        'yt_edit_320': "🎧 ادیت (320)",
+        'yt_edit_128': "🎧 ادیت (128)",
+        'yt_dir_320': "🚀 مستقیم (320)",
+        'yt_dir_128': "🚀 مستقیم (128)",
+        'yt_error': "❌ خطا در دریافت/دانلود ویدیو!",
+        'yt_downloading': "⏳ در حال دانلود و استخراج صدا..."
     },
     'en': {
         'welcome': "Hello {name}, welcome to **NavaTag**. 🌑\n\nThis is a precise tool for managing your audio files' metadata.\nFeatures at your disposal:\n\n• Full ID3 tag editing (Title, Artist, Album, etc.)\n• Centralized cover art and lyrics management\n• Advanced tools like audio cutting, format conversion, and standard renaming\n\n📂 Send your audio file to start the process.",
@@ -158,7 +165,6 @@ MESSAGES = {
         'detected_lang': "🌐 Language: {lang}",
         'send_new_value': "👇 Please send the new value:",
         'send_cover': "🖼 Send the cover photo 👇",
-        
         'uploading': "Uploading final file... 📤",
         'report_header': "🚀 **Operation Completed Successfully!**\n━━━━━━━━━━━━━━━━━━━━\n\n📂 Final File: `{filename}`\n📏 Size: `{size}`\n⏱ Duration: `{duration}`\n",
         'voice_caption': "✅ Your voice message is ready.\n🤖 @NavaTagbot",
@@ -175,8 +181,15 @@ MESSAGES = {
         'cancelled_cleanup': "❌ Operation cancelled and temporary files cleaned up.",
         'help_text': "🎵 **How to use NavaTag**\n\n1. Send an audio file or voice message.\n2. Choose a tag to edit (Cover, Title, Artist, etc.) from the inline menu.\n3. Send the new value.\n4. Press **✅ Apply & Upload**.\n\n⚡️ **Tip:** Use the **Settings** menu to lock fixed tags (like your channel name) so you don't have to enter them every time.",
         'support_text': "👨‍💻 **Support & Contact**\n\nTo report bugs, suggest new features, or contact the developer, message:\n\n👤 @A_HZ81",
-        'back_to_start': "🔙 Back to Main Menu"
-
+        'back_to_start': "🔙 Back to Main Menu",
+        'yt_fetching': "⏳ Fetching video info...",
+        'yt_panel': "🎬 **Video Information**\n━━━━━━━━━━━━━━━━━━━━\n📌 Title: `{title}`\n👤 Channel: `{channel}`\n⏱ Duration: `{duration}`\n👁 Views: `{views:,}`\n━━━━━━━━━━━━━━━━━━━━\n👇 Select quality and action:",
+        'yt_edit_320': "🎧 Edit (320)",
+        'yt_edit_128': "🎧 Edit (128)",
+        'yt_dir_320': "🚀 Direct (320)",
+        'yt_dir_128': "🚀 Direct (128)",
+        'yt_error': "❌ Error fetching/downloading video!",
+        'yt_downloading': "⏳ Downloading and extracting audio..."
     }
 }
 

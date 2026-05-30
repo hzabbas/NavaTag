@@ -1,40 +1,27 @@
 import logging
 import os
 import shutil
-from telegram import InlineKeyboardMarkup, Update , InlineKeyboardButton
+import re
+from telegram import InlineKeyboardMarkup, Update, InlineKeyboardButton
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, 
     filters, ConversationHandler, CallbackQueryHandler, ContextTypes,
-    InlineQueryHandler, TypeHandler, Application , ChatMemberHandler
+    InlineQueryHandler, TypeHandler, Application, ChatMemberHandler
 )
-
 from config import Config
-from database.user_service import initialize_database , get_locked_channels
-from handlers.settings import settings_panel, settings_callback, receive_preset_value, SETTINGS_MENU, WAITING_PRESET_VALUE , WAITING_SETTINGS_CHANNEL   
-
+from database.user_service import initialize_database, get_locked_channels
+from handlers.settings import settings_panel, settings_callback, receive_preset_value, SETTINGS_MENU, WAITING_PRESET_VALUE, WAITING_SETTINGS_CHANNEL   
 from handlers.start import start, initial_language_selection, help_support_callback
 from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
-
 from handlers.editor import (
-    start_editor, 
-    handle_button_click, 
-    receive_new_value, 
-    receive_cover, 
-    receive_channel,
-    cancel_command, 
-    handle_timeout,
-    inline_query_handler
+    start_editor, handle_button_click, receive_new_value, receive_cover, receive_channel,
+    cancel_command, handle_timeout, inline_query_handler
 )
 from handlers.admin import (
-    admin_panel, 
-    admin_callback, 
-    process_broadcast, 
-    cancel_broadcast,
-    set_lock_channel,
-    ADMIN_MENU,
-    BROADCAST_REQUEST,
-    WAITING_LOCK_CHANNEL
+    admin_panel, admin_callback, process_broadcast, cancel_broadcast,
+    set_lock_channel, ADMIN_MENU, BROADCAST_REQUEST, WAITING_LOCK_CHANNEL
 )
+from handlers.youtube import handle_youtube_link, process_youtube_callback
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -46,7 +33,6 @@ def clear_downloads():
     if not os.path.exists(folder):
         os.makedirs(folder)
         return
-
     for filename in os.listdir(folder):
         file_path = os.path.join(folder, filename)
         try:
@@ -55,8 +41,7 @@ def clear_downloads():
             elif os.path.isdir(file_path):
                 shutil.rmtree(file_path)
         except Exception as e:
-            print(f'Failed to delete {file_path}. Reason: {e}')
-    print("Downloads folder cleared.")
+            pass
 
 async def start_over_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -77,7 +62,6 @@ async def get_unjoined_channels(user_id, context):
     locked_channels = get_locked_channels()
     if not locked_channels:
         return []
-    
     not_joined = []
     for ch_id, title, link in locked_channels:
         try:
@@ -99,10 +83,8 @@ def build_lock_keyboard(unjoined_channels):
 async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     unjoined = await get_unjoined_channels(user_id, context)
-    
     if not unjoined:
         return True
-        
     reply_markup = build_lock_keyboard(unjoined)
     msg_text = (
         "🔒 **دسترسی محدود شده است**\n"
@@ -110,7 +92,6 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 کاربر گرامی، جهت حمایت از ما و استفاده رایگان از ربات، لطفاً در کانال‌های اسپانسر عضو شوید.\n\n"
         "✅ **به محض عضویت، این پیام خودکار محو می‌شود.**"
     )
-
     if update.callback_query:
         try:
             await update.callback_query.edit_message_text(text=msg_text, reply_markup=reply_markup, parse_mode='Markdown')
@@ -119,13 +100,11 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.message:
         msg = await context.bot.send_message(chat_id=user_id, text=msg_text, reply_markup=reply_markup, parse_mode='Markdown')
         context.bot_data[f"lock_msg_{user_id}"] = msg.message_id
-        
     return False
 
 async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     is_fully_joined = await check_membership(update, context)
-
     if is_fully_joined:
         await query.answer("✅ عضویت تایید شد! خوش آمدید.", show_alert=True)
         try: 
@@ -141,30 +120,29 @@ async def protected_start_editor(update: Update, context: ContextTypes.DEFAULT_T
         return await start_editor(update, context)
     return ConversationHandler.END
 
+async def protected_youtube_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_membership(update, context):
+        return await handle_youtube_link(update, context)
+    return ConversationHandler.END
+
 async def auto_check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.chat_member
     if not result: 
         return
-
     user_id = result.from_user.id
     new_status = result.new_chat_member.status
-    
     if new_status not in ['member', 'administrator', 'creator']:
         return
-
     lock_msg_id = context.bot_data.get(f"lock_msg_{user_id}")
     if not lock_msg_id: 
         return 
-
     unjoined = await get_unjoined_channels(user_id, context)
-
     if not unjoined:
         try:
             await context.bot.delete_message(chat_id=user_id, message_id=lock_msg_id)
             del context.bot_data[f"lock_msg_{user_id}"] 
         except Exception: 
             pass
-        
         await context.bot.send_message(
             chat_id=user_id, 
             text="🎉 **عضویت شما تایید شد!**\nاکنون می‌توانید فایل خود را ارسال کنید. 🎧",
@@ -187,11 +165,10 @@ async def auto_check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception: 
             pass
+
 def main():
-    print("Initializing database and clearing downloads...")
     initialize_database()
     clear_downloads()
-
     app = (
         ApplicationBuilder()
         .token(Config.BOT_TOKEN)
@@ -201,8 +178,6 @@ def main():
         .pool_timeout(30)
         .build()
     )
-
-
     admin_conv = ConversationHandler(
         entry_points=[
             CommandHandler('admin', admin_panel)
@@ -212,7 +187,6 @@ def main():
                 CallbackQueryHandler(admin_callback)
             ],
             BROADCAST_REQUEST: [
-                
                 CallbackQueryHandler(admin_callback),
                 MessageHandler(filters.ALL & ~filters.COMMAND, process_broadcast)
             ],
@@ -227,11 +201,16 @@ def main():
         ],
         per_message=False
     )
-    
     conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.AUDIO, protected_start_editor)], 
+        entry_points=[
+            MessageHandler(filters.AUDIO, protected_start_editor),
+            MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/.+'), protected_youtube_link)
+        ],
         states={
-            SELECT_ACTION: [CallbackQueryHandler(handle_button_click)],
+            SELECT_ACTION: [
+                CallbackQueryHandler(process_youtube_callback, pattern='^ytdl_'),
+                CallbackQueryHandler(handle_button_click)
+            ],
             WAITING_INPUT: [
                 CallbackQueryHandler(handle_button_click),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_new_value)
@@ -253,7 +232,6 @@ def main():
         conversation_timeout=3600,
         per_message=False
     )
-
     settings_conv = ConversationHandler(
         entry_points=[
             CommandHandler('settings', settings_panel) , 
@@ -273,7 +251,6 @@ def main():
         fallbacks=[CommandHandler('cancel', cancel_command)], 
         per_message=False
     )
-
     app.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join_status$'))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(initial_language_selection, pattern='^set_lang_'))
@@ -286,8 +263,6 @@ def main():
     app.add_handler(CallbackQueryHandler(start_over_callback, pattern='^start_over$'))
     app.add_handler(InlineQueryHandler(inline_query_handler))
     app.add_handler(CallbackQueryHandler(global_button_handler))
-
-    print("BOT IS RUNNING...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

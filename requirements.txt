@@ -4,3 +4,4 @@ pydub==0.25.1
 python-dotenv==1.2.1
 python-telegram-bot==22.6
 SQLAlchemy==2.0.46
+yt-dlp>=2024.03.10
