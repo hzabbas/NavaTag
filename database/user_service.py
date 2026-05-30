@@ -3,7 +3,7 @@ import sqlite3
 DB_PATH = 'bot_database.db'
 
 def _execute(query, params=(), fetch=False, fetchall=False):
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
         cursor = conn.cursor()
         cursor.execute(query, params)
         if fetch:
@@ -14,8 +14,9 @@ def _execute(query, params=(), fetch=False, fetchall=False):
         return cursor.rowcount
 
 def initialize_database():
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
         cursor = conn.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL;')
         cursor.executescript('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY, 
@@ -57,7 +58,11 @@ def initialize_database():
         conn.commit()
 
 def set_fast_mode(user_id, status):
-    _execute('INSERT OR REPLACE INTO user_settings (user_id, fast_mode) VALUES (?, ?)', (user_id, int(status)))
+    _execute('''
+        INSERT INTO user_settings (user_id, fast_mode) 
+        VALUES (?, ?) 
+        ON CONFLICT(user_id) DO UPDATE SET fast_mode=excluded.fast_mode
+    ''', (user_id, int(status)))
 
 def get_fast_mode(user_id):
     res = _execute('SELECT fast_mode FROM user_settings WHERE user_id = ?', (user_id,), fetch=True)
@@ -95,7 +100,11 @@ def get_bot_setting(key):
 
 def add_user(user_id, username, full_name):
     try:
-        _execute('INSERT OR REPLACE INTO users (user_id, username, full_name) VALUES (?, ?, ?)', (user_id, username, full_name))
+        _execute('''
+            INSERT INTO users (user_id, username, full_name) 
+            VALUES (?, ?, ?) 
+            ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, full_name=excluded.full_name
+        ''', (user_id, username, full_name))
     except Exception:
         pass
 
@@ -137,10 +146,16 @@ def get_selected_channels(user_id):
     return [row[0] for row in rows] if rows else []
 
 def set_user_setting(user_id, key, value):
-    _execute('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)', (user_id, key, str(value)))
+    _execute('''
+        INSERT INTO user_settings (user_id, key, value) 
+        VALUES (?, ?, ?) 
+        ON CONFLICT(user_id) DO UPDATE SET key=excluded.key, value=excluded.value
+    ''', (user_id, key, str(value)))
+
 def has_language_set(user_id):
     res = _execute('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', (user_id, 'language'), fetch=True)
     return bool(res)
+
 def get_user_language(user_id):
     res = _execute('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', (user_id, 'language'), fetch=True)
     return res[0] if res else 'fa'

@@ -215,16 +215,16 @@ async def set_lock_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await context.bot.delete_message(chat_id, instruct_id)
             except: pass
             context.user_data['lock_instruction_msg_id'] = None
-        safe_title = chat_info.title.replace('*', '').replace('_', '').replace('`', '')
+            
+        safe_title = chat_info.title.replace('*', '').replace('_', '').replace('`', '').replace('[', '').replace(']', '')
         success = await context.bot.send_message(
             chat_id,
-            f"✅ کانال **{chat_info.title}** به لیست قفل اضافه شد.",
+            f"✅ کانال **{safe_title}** به لیست قفل اضافه شد.",
             parse_mode='Markdown'
         )
         await asyncio.sleep(3)
         try: await success.delete()
         except: pass
-
 
         await admin_panel(update, context)
         return ADMIN_MENU

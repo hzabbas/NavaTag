@@ -242,7 +242,7 @@ def main():
             ],
             WAITING_CHANNEL: [
                 CallbackQueryHandler(handle_button_click),
-                MessageHandler(filters.TEXT | filters.FORWARDED, receive_channel)
+                MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.FORWARDED, receive_channel)
             ],
             ConversationHandler.TIMEOUT: [TypeHandler(Update, handle_timeout)]
         },
@@ -250,7 +250,7 @@ def main():
             CommandHandler("cancel", cancel_command)
         ],
         allow_reentry=True,
-        conversation_timeout=60,
+        conversation_timeout=3600,
         per_message=False
     )
 
@@ -263,11 +263,11 @@ def main():
             SETTINGS_MENU: [CallbackQueryHandler(settings_callback)],
             WAITING_PRESET_VALUE: [
                 CallbackQueryHandler(settings_callback), 
-                MessageHandler(filters.TEXT | filters.PHOTO, receive_preset_value)
+                MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.PHOTO, receive_preset_value)
             ],
             WAITING_SETTINGS_CHANNEL: [
                 CallbackQueryHandler(settings_callback), 
-                MessageHandler(filters.TEXT | filters.FORWARDED, receive_channel)
+                MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.FORWARDED, receive_channel)
             ]
         },
         fallbacks=[CommandHandler('cancel', cancel_command)], 

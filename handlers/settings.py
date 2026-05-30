@@ -7,7 +7,8 @@ from utils.locales import get_text
 from database.user_service import (
     get_selected_channels, set_fast_mode, get_fast_mode, 
     set_user_preset, get_user_presets, delete_user_preset, 
-    get_user_channels, toggle_channel_selection, delete_channel
+    get_user_channels, toggle_channel_selection, delete_channel,
+    get_user_language
 )
 from handlers.start import start
 
@@ -20,8 +21,8 @@ async def safe_delete(message):
         await message.delete()
     except BadRequest:
         pass
-    except Exception as e:
-        print(f"Delete Error: {e}")
+    except Exception:
+        pass
 
 def get_settings_keyboard(user_id):
     is_fast = get_fast_mode(user_id)
@@ -84,13 +85,14 @@ async def settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['settings_panel_id'] = msg.message_id
 
     return SETTINGS_MENU
+
 async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     data = query.data
 
     if data == 'toggle_language':
-        from database.user_service import get_user_language, set_user_setting
+        from database.user_service import set_user_setting
         current_lang = get_user_language(user_id)
         new_lang = 'en' if current_lang == 'fa' else 'fa'
         set_user_setting(user_id, 'language', new_lang)
@@ -118,7 +120,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith('del_ch_set_'):
         ch_id = data.replace('del_ch_set_', '')
         delete_channel(user_id, ch_id)
-        await query.answer("🗑 کانال حذف شد.", show_alert=False)
+        await query.answer(get_text(user_id, 'channel_deleted'), show_alert=False)
         await show_settings_channels(update, context, mode='delete')
         return SETTINGS_MENU
 
@@ -133,12 +135,8 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == 'add_new_channel_settings':
         await query.answer()
         context.user_data['from_settings'] = True
-        msg_text = (
-            "➕ **افزودن کانال جدید**\n\n"
-            "لطفاً آیدی کانال را بفرستید (مثل `@Channel`) یا یک پیام از آن **فوروارد** کنید.\n\n"
-            "⚠️ **نکته:** ربات باید در آن کانال **ادمین** باشد."
-        )
-        keyboard = [[InlineKeyboardButton("🔙 بازگشت", callback_data='manage_channels_settings')]]
+        msg_text = get_text(user_id, 'add_channel_prompt')
+        keyboard = [[InlineKeyboardButton(get_text(user_id, 'btn_back'), callback_data='manage_channels_settings')]]
         
         await query.edit_message_text(
             text=msg_text,
@@ -156,7 +154,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return SETTINGS_MENU
         
     if data == 'close_settings':
-        await query.answer("بازگشت به منوی اصلی")
+        await query.answer()
         await start(update, context, edit=True)
         context.user_data.pop('settings_panel_id', None)
         return ConversationHandler.END
@@ -168,7 +166,13 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == 'toggle_fast_mode':
         current = get_fast_mode(user_id)
         set_fast_mode(user_id, not current)
-        await query.answer(f"ویرایش سریع {'فعال' if not current else 'غیرفعال'} شد")
+        
+        lang = get_user_language(user_id)
+        status_fa = 'فعال' if not current else 'غیرفعال'
+        status_en = 'enabled' if not current else 'disabled'
+        msg = f"ویرایش سریع {status_fa} شد" if lang == 'fa' else f"Fast mode {status_en}"
+        
+        await query.answer(msg)
         try:
             await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
         except BadRequest:
@@ -180,19 +184,15 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['target_preset'] = tag
         
         if tag == 'cover':
-            msg_text = "🖼 لطفاً عکس کاور ثابت خود را بفرستید (یا لینک عکس)."
+            msg_text = get_text(user_id, 'send_cover')
         else:
-            current_val = get_user_presets(user_id).get(tag, 'تنظیم نشده')
-            msg_text = (
-                f"✍️ مقدار ثابت برای **{tag.upper()}** را بفرستید.\n\n"
-                f"مقدار فعلی: `{current_val}`\n"
-                f"❌ برای حذف قفل، کلمه `del` را بفرستید."
-            )
+            current_val = get_user_presets(user_id).get(tag, '-')
+            msg_text = f"✍️ {tag.upper()} \n\n`{current_val}`\n❌ 'del'"
   
         await query.edit_message_text(
             msg_text,
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data='back_to_settings')]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(get_text(user_id, 'btn_back'), callback_data='back_to_settings')]])
         )
         return WAITING_PRESET_VALUE
     
@@ -218,27 +218,27 @@ async def receive_preset_value(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if text.lower() == 'del':
             delete_user_preset(user_id, tag if tag != 'cover' else 'has_cover')
-            status_text = f"🗑 قفل تگ {tag} برداشته شد."
+            status_text = f"🗑 {tag}"
         elif tag == 'year':
             if not text.isdigit() or len(text) != 4:
-                err = await context.bot.send_message(chat_id, "⚠️ خطا: سال باید فقط عدد و ۴ رقمی باشد (مثلاً 2024)")
+                err = await context.bot.send_message(chat_id, "⚠️")
                 await asyncio.sleep(3)
                 await safe_delete(err)
                 return WAITING_PRESET_VALUE 
             else:
                 set_user_preset(user_id, tag, text)
-                status_text = f"✅ تگ {tag} روی `{text}` قفل شد."
+                status_text = f"✅ {tag} `{text}`"
         else:
             set_user_preset(user_id, tag, text)
-            status_text = f"✅ تگ {tag} روی `{text}` قفل شد."
+            status_text = f"✅ {tag} `{text}`"
 
     elif update.message.photo and tag == 'cover':
         file_id = update.message.photo[-1].file_id
         set_user_preset(user_id, 'has_cover', file_id)
-        status_text = "✅ عکس کاور ثابت ذخیره شد."
+        status_text = "✅"
 
     panel_id = context.user_data.get('settings_panel_id')
-    final_text = f"{status_text}\n\n⚙️ **تنظیمات شخصی شما**"
+    final_text = f"{status_text}\n\n⚙️"
     
     if panel_id:
         try:
@@ -283,25 +283,23 @@ async def show_settings_channels(update: Update, context: ContextTypes.DEFAULT_T
             text = f"{status} {title}"
             callback = f"toggle_ch_set_{ch_id}"
         else:
-            text = f"🗑 حذف: {title}"
+            text = f"🗑: {title}"
             callback = f"del_ch_set_{ch_id}"
             
         keyboard.append([InlineKeyboardButton(text, callback_data=callback)])
 
     controls = []
     if mode == 'view':
-        controls.append(InlineKeyboardButton("➕ افزودن کانال", callback_data='add_new_channel_settings'))
+        controls.append(InlineKeyboardButton("➕", callback_data='add_new_channel_settings'))
         if channels:
-            controls.append(InlineKeyboardButton("🗑 مدیریت حذف", callback_data='mode_delete_settings'))
+            controls.append(InlineKeyboardButton("🗑", callback_data='mode_delete_settings'))
     else:
-        controls.append(InlineKeyboardButton("🔙 اتمام حذف", callback_data='mode_view_settings'))
+        controls.append(InlineKeyboardButton(get_text(user_id, 'btn_back'), callback_data='mode_view_settings'))
     
     keyboard.append(controls)
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data='back_to_main_settings')])
+    keyboard.append([InlineKeyboardButton(get_text(user_id, 'btn_back'), callback_data='back_to_main_settings')])
     
-    msg_text = "📢 **مدیریت کانال‌های مقصد (تنظیمات)**\n\n✅ = ارسال می‌شود\n❌ = ارسال نمی‌شود"
-    if mode == 'delete': msg_text = "⚠️ **حالت حذف:** برای حذف کانال روی آن کلیک کنید."
-
+    msg_text = get_text(user_id, 'settings_menu')
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:

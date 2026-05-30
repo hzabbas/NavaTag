@@ -58,6 +58,7 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = os.path.join(Config.DOWNLOAD_PATH, f"{update.message.audio.file_unique_id}.mp3")
     await new_file.download_to_drive(file_path)
 
+    context.user_data['chat_id'] = update.effective_chat.id
     context.user_data['file_path'] = file_path
     context.user_data['changes'] = []
     context.user_data['filename'] = update.message.audio.file_name or "music.mp3"
@@ -69,7 +70,7 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tags_to_apply = {k: v for k, v in presets.items() if k != 'has_cover'}
         
         if tags_to_apply:
-            apply_tags(file_path, tags_to_apply)
+            await asyncio.to_thread(apply_tags, file_path, tags_to_apply)
             for t in tags_to_apply: context.user_data['changes'].append(t)
         
         if cover_file_id:
@@ -77,11 +78,11 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cover_file = await context.bot.get_file(cover_file_id)
                 cover_path = os.path.join(Config.DOWNLOAD_PATH, f"preset_cover_{user_id}.jpg")
                 await cover_file.download_to_drive(cover_path)
-                set_cover_from_file(file_path, cover_path)
+                await asyncio.to_thread(set_cover_from_file, file_path, cover_path)
                 os.remove(cover_path) 
                 context.user_data['changes'].append('has_cover')
-            except Exception as e:
-                print(f"Error setting preset cover: {e}")
+            except Exception:
+                pass
 
     await safe_delete(msg)
 
@@ -286,6 +287,7 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     if data == 'goto_advanced':
+        await query.answer()
         msg_id = context.user_data.get('msg_to_delete')
         if msg_id:
             try: await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
@@ -296,15 +298,15 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SELECT_ACTION 
 
     if data == 'goto_main':
+        await query.answer()
         await show_panel(update, context, is_first_time=False)
         return SELECT_ACTION 
 
     if data == 'cancel': 
         await query.answer(get_text(user_id, 'op_cancelled'))
         await query.message.delete()
-        if file_path and os.path.exists(file_path): 
-            try: os.remove(file_path)
-            except: pass
+        if file_path:
+            cleanup_all_files(file_path)
         return ConversationHandler.END
 
     if data == 'done': 
@@ -312,13 +314,16 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     if data == 'manage_channels': 
+        await query.answer()
         await show_channels_menu(update, context, mode='view')
         return SELECT_ACTION
 
     if data == 'mode_delete':
+        await query.answer()
         await show_channels_menu(update, context, mode='delete')
         return SELECT_ACTION
     if data == 'mode_view':
+        await query.answer()
         await show_channels_menu(update, context, mode='view')
         return SELECT_ACTION
 
@@ -555,7 +560,7 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_delete(msg)
         return WAITING_INPUT
 
-    success = set_tag(file_path, tag_to_edit, new_text)
+    success = await asyncio.to_thread(set_tag, file_path, tag_to_edit, new_text)
 
     if success:
         if tag_to_edit not in context.user_data['changes']:
@@ -713,7 +718,7 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     display_filename = context.user_data.get('filename', 'music.mp3')
 
     selected_channels = get_selected_channels(user_id)
-    tags = get_tags(file_path)
+    tags = await asyncio.to_thread(get_tags, file_path)
     
     report_text = get_text(user_id, 'report_header').format(
         filename=display_filename,
@@ -722,22 +727,22 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     thumb_path = None
-    try:
-        from mutagen.mp3 import MP3
-        from mutagen.id3 import ID3, APIC
-        audio_tags = MP3(file_path, ID3=ID3)
-        if audio_tags.tags:
-            for tag in audio_tags.tags.values():
-                if isinstance(tag, APIC):
-                    thumb_path = file_path.replace(os.path.splitext(file_path)[1], ".jpg")
-                    with open(thumb_path, "wb") as f: f.write(tag.data)
-                    break
-    except: pass
-
     sent_audio = None
     sent_count = 0
 
     try:
+        try:
+            from mutagen.mp3 import MP3
+            from mutagen.id3 import ID3, APIC
+            audio_tags = MP3(file_path, ID3=ID3)
+            if audio_tags.tags:
+                for tag in audio_tags.tags.values():
+                    if isinstance(tag, APIC):
+                        thumb_path = file_path.replace(os.path.splitext(file_path)[1], ".jpg")
+                        with open(thumb_path, "wb") as f: f.write(tag.data)
+                        break
+        except: pass
+
         with open(file_path, 'rb') as audio_file:
             thumb_file = open(thumb_path, 'rb') if thumb_path and os.path.exists(thumb_path) else None
             
@@ -776,44 +781,46 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         except: pass
             
             if thumb_file: thumb_file.close()
-    except Exception as e:
-        print(f"Send Error: {e}")
 
-    keyboard = []
-    if sent_audio:
-        file_id = None
-        query_data = "" 
+        keyboard = []
+        if sent_audio:
+            file_id = None
+            query_data = "" 
 
-        if is_voice:
-            file_id = sent_audio.voice.file_id
-            query_data = f"voice:{file_id}"
-        else:
-            file_id = sent_audio.audio.file_id
-            if file_path.lower().endswith(".mp3"):
-                query_data = f"audio:{file_id}"
+            if is_voice:
+                file_id = sent_audio.voice.file_id
+                query_data = f"voice:{file_id}"
             else:
-                query_data = f"{file_id}"
+                file_id = sent_audio.audio.file_id
+                if file_path.lower().endswith(".mp3"):
+                    query_data = f"audio:{file_id}"
+                else:
+                    query_data = f"{file_id}"
 
-        keyboard.append([InlineKeyboardButton(get_text(user_id, 'share_btn'), switch_inline_query=query_data)])
-        
-    if selected_channels:
-        report_text += get_text(user_id, 'sent_to_channels').format(count=sent_count)
+            keyboard.append([InlineKeyboardButton(get_text(user_id, 'share_btn'), switch_inline_query=query_data)])
+            
+        if selected_channels:
+            report_text += get_text(user_id, 'sent_to_channels').format(count=sent_count)
 
-    report_text += get_text(user_id, 'thanks')
+        report_text += get_text(user_id, 'thanks')
 
-    await query.message.reply_text(
-        report_text, 
-        reply_markup=InlineKeyboardMarkup(keyboard), 
-        parse_mode='Markdown'
-    )
+        await query.message.reply_text(
+            report_text, 
+            reply_markup=InlineKeyboardMarkup(keyboard), 
+            parse_mode='Markdown'
+        )
 
-    if file_path:
-        cleanup_all_files(file_path)
+        try: await query.message.delete()
+        except: pass
 
-    try: await query.message.delete()
-    except: pass
-    
-    context.user_data.clear()
+    finally:
+        if thumb_path and os.path.exists(thumb_path):
+            try: os.remove(thumb_path)
+            except: pass
+        if file_path:
+            cleanup_all_files(file_path)
+        context.user_data.clear()
+
     return ConversationHandler.END
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query
@@ -997,27 +1004,26 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     file_path = context.user_data.get('file_path')
     display_filename = context.user_data.get('filename', 'music.mp3')
-    
     selected_channels = get_selected_channels(user_id)
-
     thumb_path = None
-    try:
-        from mutagen.mp3 import MP3
-        from mutagen.id3 import ID3, APIC
-        audio = MP3(file_path, ID3=ID3)
-        if audio.tags:
-            for tag in audio.tags.values():
-                if isinstance(tag, APIC):
-                    import random
-                    thumb_path = file_path.replace(".mp3", f"_thumb_{random.randint(1000,9999)}.jpg")
-                    with open(thumb_path, "wb") as f:
-                        f.write(tag.data)
-                    break
-    except Exception as e:
-        print(f"Thumb extraction error: {e}")
-
     sent_count = 0
+
     try:
+        try:
+            from mutagen.mp3 import MP3
+            from mutagen.id3 import ID3, APIC
+            audio = MP3(file_path, ID3=ID3)
+            if audio.tags:
+                for tag in audio.tags.values():
+                    if isinstance(tag, APIC):
+                        import random
+                        thumb_path = file_path.replace(".mp3", f"_thumb_{random.randint(1000,9999)}.jpg")
+                        with open(thumb_path, "wb") as f:
+                            f.write(tag.data)
+                        break
+        except Exception:
+            pass
+
         with open(file_path, 'rb') as audio_file:
             thumb_file = open(thumb_path, 'rb') if thumb_path and os.path.exists(thumb_path) else None
             
@@ -1045,8 +1051,8 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
                             caption=get_text(user_id, 'channel_caption') 
                         )
                         sent_count += 1
-                    except Exception as e:
-                        print(f"Failed to send to channel {ch_id}: {e}")
+                    except Exception:
+                        pass
 
             if thumb_file: thumb_file.close()
             
@@ -1056,14 +1062,15 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         await update.message.reply_text(get_text(user_id, 'send_error').format(e=e))
 
-    if thumb_path and os.path.exists(thumb_path): 
-        try: os.remove(thumb_path)
+    finally:
+        if thumb_path and os.path.exists(thumb_path): 
+            try: os.remove(thumb_path)
+            except: pass
+        if file_path:
+            cleanup_all_files(file_path)
+        try: await status_msg.delete()
         except: pass
-        
-    cleanup_all_files(file_path)
-    try: await status_msg.delete()
-    except: pass
-    context.user_data.clear()
+        context.user_data.clear()
 def get_thumb_path(file_path):
     from mutagen.mp3 import MP3
     from mutagen.id3 import ID3, APIC
