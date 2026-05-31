@@ -9,6 +9,7 @@ from config import Config
 from database.user_service import get_selected_channels
 from handlers.editor import cleanup_all_files, safe_delete, show_panel
 from utils.locales import get_text
+from utils.progress import ProgressBufferedReader, TransferProgress
 from utils.states import SELECT_ACTION
 
 
@@ -22,7 +23,7 @@ def _get_sc_info(url):
         return ydl.extract_info(url, download=False)
 
 
-def _download_sc(url, quality, output_path):
+def _download_sc(url, quality, output_path, progress=None, loop=None):
     out_base = output_path.rsplit('.', 1)[0]
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -37,6 +38,8 @@ def _download_sc(url, quality, output_path):
         'quiet': True,
         'no_warnings': True,
     }
+    if progress and loop:
+        ydl_opts['progress_hooks'] = [lambda data: progress.yt_dlp_hook(data, loop)]
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
     return output_path
@@ -154,22 +157,32 @@ async def _download_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE,
     entries = context.user_data.get('sc_entries', [])
     status_msg = await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=get_text(user_id, 'sc_downloading'),
+        text="🚀 Initiating...",
     )
     selected_channels = get_selected_channels(user_id)
     successful_downloads = 0
+    loop = asyncio.get_running_loop()
+    progress = None
 
     for index, entry in enumerate(entries, 1):
-        await status_msg.edit_text(
-            get_text(user_id, 'sc_pl_progress').format(current=index, total=len(entries))
+        progress = TransferProgress(
+            context.bot,
+            update.effective_chat.id,
+            status_msg.message_id,
+            "Downloading",
+            entry.get('title') or 'Unknown',
+            "Unknown",
+            "SoundCloud Playlist",
         )
+        progress.status = f"Track {index} of {len(entries)}"
+        await progress.update_message(force=True)
         raw_path = os.path.join(Config.DOWNLOAD_PATH, f'{os.urandom(8).hex()}.mp3')
 
         try:
-            await asyncio.to_thread(_download_sc, entry['url'], quality, raw_path)
+            await asyncio.to_thread(_download_sc, entry['url'], quality, raw_path, progress, loop)
             filename = _safe_filename(entry.get('title') or 'Unknown')
 
-            with open(raw_path, 'rb') as audio_file:
+            with ProgressBufferedReader(raw_path, progress) as audio_file:
                 await context.bot.send_audio(
                     chat_id=update.effective_chat.id,
                     audio=audio_file,
@@ -195,8 +208,13 @@ async def _download_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE,
         finally:
             cleanup_all_files(raw_path)
 
-    final_text = 'sc_pl_done' if successful_downloads else 'sc_error'
-    await status_msg.edit_text(get_text(user_id, final_text))
+    if successful_downloads and progress:
+        progress.media_title = "Playlist Complete"
+        progress.total_size = 1
+        progress.downloaded_size = 1
+        await progress.complete()
+    else:
+        await status_msg.edit_text(get_text(user_id, 'sc_error'))
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -207,12 +225,15 @@ async def _download_track(update: Update, context: ContextTypes.DEFAULT_TYPE, ac
     title = context.user_data.get('sc_title', 'soundcloud_audio')
     status_msg = await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=get_text(user_id, 'sc_downloading'),
+        text="🚀 Initiating...",
     )
+    progress = TransferProgress(context.bot, update.effective_chat.id, status_msg.message_id, "Downloading", title, "Unknown", "SoundCloud")
+    loop = asyncio.get_running_loop()
     raw_path = os.path.join(Config.DOWNLOAD_PATH, f'{os.urandom(8).hex()}.mp3')
 
     try:
-        await asyncio.to_thread(_download_sc, url, quality, raw_path)
+        await asyncio.to_thread(_download_sc, url, quality, raw_path, progress, loop)
+        await progress.complete()
     except Exception:
         cleanup_all_files(raw_path)
         await status_msg.edit_text(get_text(user_id, 'sc_error'))
@@ -233,7 +254,7 @@ async def _download_track(update: Update, context: ContextTypes.DEFAULT_TYPE, ac
     sent_count = 0
     selected_channels = get_selected_channels(user_id)
     try:
-        with open(raw_path, 'rb') as audio_file:
+        with ProgressBufferedReader(raw_path, progress) as audio_file:
             await context.bot.send_audio(
                 chat_id=update.effective_chat.id,
                 audio=audio_file,
@@ -260,13 +281,14 @@ async def _download_track(update: Update, context: ContextTypes.DEFAULT_TYPE, ac
                 text=get_text(user_id, 'fast_sent_channels').format(count=sent_count),
                 parse_mode='Markdown',
             )
+        await progress.complete()
     except Exception as error:
+        await progress.cancel()
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=get_text(user_id, 'send_error').format(e=error),
         )
     finally:
-        await safe_delete(status_msg)
         cleanup_all_files(raw_path)
         context.user_data.clear()
 

@@ -7,6 +7,7 @@ from config import Config
 from database.user_service import get_selected_channels
 from handlers.editor import show_panel, safe_delete, cleanup_all_files
 from utils.locales import get_text
+from utils.progress import ProgressBufferedReader, TransferProgress
 from utils.states import SELECT_ACTION
 
 def _get_yt_info(url):
@@ -14,7 +15,7 @@ def _get_yt_info(url):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False)
 
-def _download_yt(url, quality, output_path):
+def _download_yt(url, quality, output_path, progress=None, loop=None):
     out_base = output_path.rsplit('.', 1)[0]
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -28,6 +29,8 @@ def _download_yt(url, quality, output_path):
         'postprocessor_args': {'ffmpeg': ['-id3v2_version', '3']},
         'quiet': True
     }
+    if progress and loop:
+        ydl_opts['progress_hooks'] = [lambda data: progress.yt_dlp_hook(data, loop)]
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
     return output_path
@@ -80,11 +83,14 @@ async def process_youtube_callback(update: Update, context: ContextTypes.DEFAULT
         await query.edit_message_reply_markup(reply_markup=None)
     except Exception:
         pass
-    status_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=get_text(user_id, 'yt_downloading'))
+    status_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text="🚀 Initiating...")
+    progress = TransferProgress(context.bot, update.effective_chat.id, status_msg.message_id, "Downloading", title, "Unknown", "YouTube")
+    loop = asyncio.get_running_loop()
     file_id = os.urandom(8).hex()
     raw_path = os.path.join(Config.DOWNLOAD_PATH, f"{file_id}.mp3")
     try:
-        await asyncio.to_thread(_download_yt, url, quality, raw_path)
+        await asyncio.to_thread(_download_yt, url, quality, raw_path, progress, loop)
+        await progress.complete()
     except Exception:
         await status_msg.edit_text(get_text(user_id, 'yt_error'))
         return ConversationHandler.END
@@ -99,7 +105,7 @@ async def process_youtube_callback(update: Update, context: ContextTypes.DEFAULT
         sent_count = 0
         selected_channels = get_selected_channels(user_id)
         try:
-            with open(raw_path, 'rb') as audio_file:
+            with ProgressBufferedReader(raw_path, progress) as audio_file:
                 await context.bot.send_audio(
                     chat_id=update.effective_chat.id,
                     audio=audio_file,
@@ -125,13 +131,14 @@ async def process_youtube_callback(update: Update, context: ContextTypes.DEFAULT
                     text=get_text(user_id, 'fast_sent_channels').format(count=sent_count),
                     parse_mode='Markdown'
                 )
+            await progress.complete()
         except Exception as e:
+            await progress.cancel()
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=get_text(user_id, 'send_error').format(e=e)
             )
         finally:
-            await safe_delete(status_msg)
             cleanup_all_files(raw_path)
             context.user_data.clear()
         return ConversationHandler.END

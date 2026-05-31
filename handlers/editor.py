@@ -22,6 +22,7 @@ from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CH
 from utils.tagger import get_tags, set_tag, set_cover_from_file, delete_all_tags, apply_tags
 from utils.pro_tools import convert_audio, detect_lyrics_lang, generate_standard_filename, smart_clean_tags
 from utils.locales import get_text
+from utils.progress import IndeterminateProgress, ProgressBufferedReader, TransferProgress
 
 async def safe_delete(message):
     if not message:
@@ -52,12 +53,21 @@ def cleanup_all_files(file_path):
 
 async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    msg = await update.message.reply_text(get_text(user_id, 'downloading'))
+    msg = await update.message.reply_text("🚀 Initiating...")
+    progress = TransferProgress(context.bot, update.effective_chat.id, msg.message_id, "Downloading", update.message.audio.file_name or "music.mp3", "Unknown", "Telegram")
+    indeterminate = IndeterminateProgress(progress)
+    indeterminate.start()
     
     file_id = update.message.audio.file_id
     new_file = await context.bot.get_file(file_id)
     file_path = os.path.join(Config.DOWNLOAD_PATH, f"{update.message.audio.file_unique_id}.mp3")
-    await new_file.download_to_drive(file_path)
+    try:
+        await new_file.download_to_drive(file_path)
+    except Exception:
+        await progress.cancel()
+        raise
+    finally:
+        indeterminate.stop()
 
     context.user_data['chat_id'] = update.effective_chat.id
     context.user_data['file_path'] = file_path
@@ -368,10 +378,25 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
     if data == 'menu_lock': await show_lock_menu(update, context); return SELECT_ACTION
 
     if data == 'convert_to_voice':
-        await query.answer(get_text(user_id, 'converting_voice'))
+        await query.answer()
         current_path = context.user_data.get('file_path')
+        msg = await context.bot.send_message(chat_id, "🚀 Initiating...")
+        progress = TransferProgress(context.bot, chat_id, msg.message_id, "Converting", "Voice Note", "Unknown", "FFmpeg")
+        progress.status = "Encoding to OGG Opus..."
+        indeterminate = IndeterminateProgress(progress)
+        indeterminate.start()
         
-        voice_path = await asyncio.to_thread(convert_audio, current_path, "ogg", "64k")
+        try:
+            voice_path = await asyncio.to_thread(convert_audio, current_path, "ogg", "64k")
+        finally:
+            indeterminate.stop()
+
+        if voice_path:
+            await progress.complete()
+        else:
+            await progress.cancel()
+        await asyncio.sleep(1)
+        await safe_delete(msg)
         
         if voice_path:
             if current_path != voice_path and os.path.exists(current_path):
@@ -394,7 +419,7 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SELECT_ACTION
 
     if data.startswith('convert_'):
-        await query.answer(get_text(user_id, 'converting_format'))
+        await query.answer()
         target = data.replace('convert_', '')
         
         fmt = 'mp3'
@@ -404,8 +429,24 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         elif target == 'wav': fmt = 'wav' 
         elif target == 'ogg': fmt = 'ogg'; bitrate = '128k'
 
-        old_tags = await asyncio.to_thread(get_tags, file_path) 
-        new_path = await asyncio.to_thread(convert_audio, file_path, fmt, bitrate)
+        msg = await context.bot.send_message(chat_id, "🚀 Initiating...")
+        progress = TransferProgress(context.bot, chat_id, msg.message_id, "Converting", f"Format: {fmt.upper()}", "Unknown", "FFmpeg")
+        progress.status = f"Encoding audio to {fmt.upper()}..."
+        indeterminate = IndeterminateProgress(progress)
+        indeterminate.start()
+
+        try:
+            old_tags = await asyncio.to_thread(get_tags, file_path)
+            new_path = await asyncio.to_thread(convert_audio, file_path, fmt, bitrate)
+        finally:
+            indeterminate.stop()
+
+        if new_path:
+            await progress.complete()
+        else:
+            await progress.cancel()
+        await asyncio.sleep(1)
+        await safe_delete(msg)
         
         if new_path:
             if os.path.exists(file_path) and file_path != new_path:
@@ -534,10 +575,20 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             file_path = context.user_data.get('file_path')
             
-            status_msg = await update.message.reply_text("⏳ در حال برش...")
-            
-            await asyncio.to_thread(_process_cut, file_path, start_ms, end_ms)
-
+            status_msg = await update.message.reply_text("🚀 Initiating...")
+            progress = TransferProgress(context.bot, update.effective_chat.id, status_msg.message_id, "Processing", "Audio Cut", "Unknown", "FFmpeg")
+            progress.status = "Cutting audio segment..."
+            indeterminate = IndeterminateProgress(progress)
+            indeterminate.start()
+            try:
+                await asyncio.to_thread(_process_cut, file_path, start_ms, end_ms)
+                await progress.complete()
+            except Exception:
+                await progress.cancel()
+                raise
+            finally:
+                indeterminate.stop()
+            await asyncio.sleep(1)
             await safe_delete(status_msg)
             temp_ok = await update.message.reply_text("✅ برش با موفقیت انجام شد!")
             
@@ -731,9 +782,11 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await query.answer(get_text(user_id, 'uploading'))
     
+    status_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text="🚀 Initiating...")
     file_path = context.user_data.get('file_path')
     is_voice = context.user_data.get('is_voice', False)
     display_filename = context.user_data.get('filename', 'music.mp3')
+    progress = TransferProgress(context.bot, update.effective_chat.id, status_msg.message_id, "Uploading", display_filename, "Unknown", "Telegram")
 
     selected_channels = get_selected_channels(user_id)
     tags = await asyncio.to_thread(get_tags, file_path)
@@ -761,7 +814,7 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         break
         except: pass
 
-        with open(file_path, 'rb') as audio_file:
+        with ProgressBufferedReader(file_path, progress) as audio_file:
             thumb_file = open(thumb_path, 'rb') if thumb_path and os.path.exists(thumb_path) else None
             
             if is_voice:
@@ -800,6 +853,7 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if thumb_file: thumb_file.close()
 
+        await progress.complete()
         keyboard = []
         if sent_audio:
             file_id = None
@@ -832,6 +886,8 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except: pass
 
     finally:
+        if not progress.is_completed:
+            await progress.cancel()
         if thumb_path and os.path.exists(thumb_path):
             try: os.remove(thumb_path)
             except: pass
@@ -1018,10 +1074,11 @@ async def show_convert_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    status_msg = await update.message.reply_text(get_text(user_id, 'fast_mode_active'))
+    status_msg = await update.message.reply_text("🚀 Initiating...")
     
     file_path = context.user_data.get('file_path')
     display_filename = context.user_data.get('filename', 'music.mp3')
+    progress = TransferProgress(context.bot, update.effective_chat.id, status_msg.message_id, "Uploading", display_filename, "Unknown", "Telegram")
     selected_channels = get_selected_channels(user_id)
     thumb_path = None
     sent_count = 0
@@ -1042,7 +1099,7 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception:
             pass
 
-        with open(file_path, 'rb') as audio_file:
+        with ProgressBufferedReader(file_path, progress) as audio_file:
             thumb_file = open(thumb_path, 'rb') if thumb_path and os.path.exists(thumb_path) else None
             
             await context.bot.send_audio(
@@ -1074,10 +1131,12 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
 
             if thumb_file: thumb_file.close()
             
+            await progress.complete()
             if sent_count > 0:
                 await update.message.reply_text(get_text(user_id, 'fast_sent_channels').format(count=sent_count))
             
     except Exception as e:
+        await progress.cancel()
         await update.message.reply_text(get_text(user_id, 'send_error').format(e=e))
 
     finally:
@@ -1086,8 +1145,6 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
             except: pass
         if file_path:
             cleanup_all_files(file_path)
-        try: await status_msg.delete()
-        except: pass
         context.user_data.clear()
 def get_thumb_path(file_path):
     from mutagen.mp3 import MP3
