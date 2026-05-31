@@ -27,11 +27,13 @@ def _download_sc(url, quality, output_path):
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': f'{out_base}.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': quality,
-        }],
+        'writethumbnail': True,
+        'postprocessors': [
+            {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': quality},
+            {'key': 'FFmpegMetadata', 'add_metadata': True},
+            {'key': 'EmbedThumbnail', 'already_have_thumbnail': False},
+        ],
+        'postprocessor_args': {'ffmpeg': ['-id3v2_version', '3']},
         'quiet': True,
         'no_warnings': True,
     }

@@ -1,8 +1,9 @@
 import os
 from mutagen import File
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TCON, TYER, TRCK, COMM, USLT, APIC
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TCON, TDRC, TRCK, COMM, USLT, APIC
 from mutagen.flac import FLAC
+from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
 
 
@@ -10,29 +11,56 @@ def apply_tags(file_path, tags_dict):
     if not os.path.exists(file_path): return False
     
     try:
-        if file_path.endswith(".mp3"):
+        if file_path.lower().endswith(".mp3"):
             audio = MP3(file_path, ID3=ID3)
             if audio.tags is None: audio.add_tags()
             
-            if tags_dict.get('title'): audio.tags.add(TIT2(encoding=3, text=tags_dict['title']))
-            if tags_dict.get('artist'): audio.tags.add(TPE1(encoding=3, text=tags_dict['artist']))
-            if tags_dict.get('album'): audio.tags.add(TALB(encoding=3, text=tags_dict['album']))
-            if tags_dict.get('genre'): audio.tags.add(TCON(encoding=3, text=tags_dict['genre']))
+            if tags_dict.get('title'):
+                audio.tags.delall("TIT2")
+                audio.tags.add(TIT2(encoding=3, text=tags_dict['title']))
+            if tags_dict.get('artist'):
+                audio.tags.delall("TPE1")
+                audio.tags.add(TPE1(encoding=3, text=tags_dict['artist']))
+            if tags_dict.get('album'):
+                audio.tags.delall("TALB")
+                audio.tags.add(TALB(encoding=3, text=tags_dict['album']))
+            if tags_dict.get('genre'):
+                audio.tags.delall("TCON")
+                audio.tags.add(TCON(encoding=3, text=tags_dict['genre']))
+            if tags_dict.get('year'):
+                audio.tags.delall("TYER")
+                audio.tags.delall("TDRC")
+                audio.tags.add(TDRC(encoding=3, text=tags_dict['year']))
+            if tags_dict.get('track'):
+                audio.tags.delall("TRCK")
+                audio.tags.add(TRCK(encoding=3, text=tags_dict['track']))
+            if tags_dict.get('comment'):
+                audio.tags.delall("COMM")
+                audio.tags.add(COMM(encoding=3, lang='eng', desc='', text=tags_dict['comment']))
+            if tags_dict.get('lyrics'):
+                audio.tags.delall("USLT")
+                audio.tags.add(USLT(encoding=3, lang='eng', desc='', text=tags_dict['lyrics']))
             
             audio.save(v2_version=3)
             del audio 
             return True
 
-        elif file_path.endswith(".flac") or file_path.endswith(".ogg"):
-            if file_path.endswith(".flac"):
+        elif file_path.lower().endswith(".flac") or file_path.lower().endswith(".ogg"):
+            if file_path.lower().endswith(".flac"):
                 audio = FLAC(file_path)
             else:
-                audio = OggVorbis(file_path)
+                audio = File(file_path)
+                if not isinstance(audio, (OggOpus, OggVorbis)):
+                    return False
             
             if tags_dict.get('title'): audio['title'] = tags_dict['title']
             if tags_dict.get('artist'): audio['artist'] = tags_dict['artist']
             if tags_dict.get('album'): audio['album'] = tags_dict['album']
             if tags_dict.get('genre'): audio['genre'] = tags_dict['genre']
+            if tags_dict.get('year'): audio['date'] = tags_dict['year']
+            if tags_dict.get('track'): audio['tracknumber'] = tags_dict['track']
+            if tags_dict.get('lyrics'): audio['lyrics'] = tags_dict['lyrics']
+            if tags_dict.get('comment'): audio['description'] = tags_dict['comment']
             
             audio.save()
             del audio
@@ -74,7 +102,7 @@ def get_tags(file_path):
             tags_data["duration"] = f"{mins}:{secs:02d}"
 
         
-        if hasattr(audio, 'tags') and audio.tags is not None:
+        if isinstance(audio, MP3) and audio.tags is not None:
             t = audio.tags
             def get_id3(key): return str(t.get(key, "")).strip()
             
@@ -94,7 +122,7 @@ def get_tags(file_path):
             for k in list(t.keys()):
                 if k.startswith("APIC"): tags_data["has_cover"] = True; break
 
-        elif isinstance(audio, FLAC):
+        elif isinstance(audio, (FLAC, OggOpus, OggVorbis)):
             def get_vorbis(key): return audio.get(key, [""])[0].strip()
             tags_data["title"] = get_vorbis("title") or "Unknown Title"
             tags_data["artist"] = get_vorbis("artist") or "Unknown Artist"
@@ -104,7 +132,9 @@ def get_tags(file_path):
             tags_data["track"] = get_vorbis("tracknumber")
             tags_data["lyrics"] = get_vorbis("lyrics")
             tags_data["comment"] = get_vorbis("comment") or get_vorbis("description")
-            if hasattr(audio, 'pictures') and audio.pictures:
+            if isinstance(audio, FLAC) and audio.pictures:
+                tags_data["has_cover"] = True
+            elif isinstance(audio, (OggOpus, OggVorbis)) and audio.get("metadata_block_picture"):
                 tags_data["has_cover"] = True
 
     except Exception as e:
@@ -128,12 +158,25 @@ def set_tag(file_path, tag_type, value):
         tags = audio.tags
         value = str(value).strip()
 
-        if tag_type == 'title': tags.add(TIT2(encoding=3, text=value))
-        elif tag_type == 'artist': tags.add(TPE1(encoding=3, text=value))
-        elif tag_type == 'album': tags.add(TALB(encoding=3, text=value))
-        elif tag_type == 'genre': tags.add(TCON(encoding=3, text=value))
-        elif tag_type == 'year': tags.add(TYER(encoding=3, text=value))
-        elif tag_type == 'track': tags.add(TRCK(encoding=3, text=value))
+        if tag_type == 'title':
+            tags.delall("TIT2")
+            tags.add(TIT2(encoding=3, text=value))
+        elif tag_type == 'artist':
+            tags.delall("TPE1")
+            tags.add(TPE1(encoding=3, text=value))
+        elif tag_type == 'album':
+            tags.delall("TALB")
+            tags.add(TALB(encoding=3, text=value))
+        elif tag_type == 'genre':
+            tags.delall("TCON")
+            tags.add(TCON(encoding=3, text=value))
+        elif tag_type == 'year':
+            tags.delall("TYER")
+            tags.delall("TDRC")
+            tags.add(TDRC(encoding=3, text=value))
+        elif tag_type == 'track':
+            tags.delall("TRCK")
+            tags.add(TRCK(encoding=3, text=value))
         elif tag_type == 'comment':
             tags.delall("COMM")
             tags.add(COMM(encoding=3, lang='eng', desc='', text=value))

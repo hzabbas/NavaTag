@@ -486,7 +486,16 @@ def _process_cut(path, start_ms, end_ms):
     duration_sec = (end_ms - start_ms) / 1000.0
     tmp_path = path + ".tmp.mp3"
     
-    subprocess.run(["ffmpeg", "-y", "-i", path, "-ss", str(start_sec), "-t", str(duration_sec), "-c", "copy", tmp_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", path, "-ss", str(start_sec), "-t", str(duration_sec),
+            "-map", "0:a", "-map", "0:v?", "-c:a", "copy", "-c:v", "copy",
+            "-map_metadata", "0", "-id3v2_version", "3", tmp_path,
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     
     if os.path.exists(tmp_path):
         shutil.move(tmp_path, path)
