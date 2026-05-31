@@ -1,28 +1,27 @@
 import os
+import subprocess
 from langdetect import detect
-from pydub import AudioSegment
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC
 
 def convert_audio(input_path, output_format, bitrate="320k"):
     try:
-        audio = AudioSegment.from_file(input_path)
         new_path = input_path.rsplit('.', 1)[0] + f".{output_format}"
+        cmd = ["ffmpeg", "-y", "-i", input_path]
         
-        params = {"format": output_format}
+        if output_format == "ogg":
+            cmd.extend(["-c:a", "libopus", "-b:a", "64k"])
+        elif output_format == "mp3":
+            cmd.extend(["-b:a", bitrate])
+            
+        cmd.append(new_path)
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        if output_format == "mp3":
-            params["bitrate"] = bitrate
-            
-        elif output_format == "ogg":
-            params["bitrate"] = "64k" 
-            params["codec"] = "libopus" 
-            
-        audio.export(new_path, **params)
-        return new_path
+        if os.path.exists(new_path):
+            return new_path
+        return None
         
     except Exception as e:
-        print(f"Conversion Error: {e}")
         return None
 
 def detect_lyrics_lang(lyrics_text):

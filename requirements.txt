@@ -1,6 +1,5 @@
 langdetect==1.0.9
 mutagen==1.47.0
-pydub==0.25.1
 python-dotenv==1.2.1
 python-telegram-bot==22.6
 SQLAlchemy==2.0.46

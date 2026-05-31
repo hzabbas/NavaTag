@@ -1,6 +1,8 @@
 import os
 import asyncio
 import random
+import subprocess
+import shutil
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, 
     InputMediaPhoto, InlineQueryResultCachedAudio, 
@@ -8,7 +10,6 @@ from telegram import (
 )
 from telegram.ext import ContextTypes, ConversationHandler
 from telegram.error import BadRequest
-from pydub import AudioSegment
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC
 
@@ -102,7 +103,7 @@ async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, is_firs
     changes = context.user_data.get('changes', [])
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    tags = get_tags(file_path)
+    tags = await asyncio.to_thread(get_tags, file_path)
 
     def mark(tag_name): return "✏️" if tag_name in changes else ""
     
@@ -307,6 +308,7 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.message.delete()
         if file_path:
             cleanup_all_files(file_path)
+        context.user_data.clear()
         return ConversationHandler.END
 
     if data == 'done': 
@@ -478,11 +480,18 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
     return SELECT_ACTION
 
 def _process_cut(path, start_ms, end_ms):
-    audio = AudioSegment.from_file(path)
-    if end_ms > len(audio) or start_ms >= end_ms:
+    if start_ms >= end_ms:
         raise ValueError("Invalid range")
-    cut_part = audio[start_ms:end_ms]
-    cut_part.export(path, format="mp3")
+    start_sec = start_ms / 1000.0
+    duration_sec = (end_ms - start_ms) / 1000.0
+    tmp_path = path + ".tmp.mp3"
+    
+    subprocess.run(["ffmpeg", "-y", "-i", path, "-ss", str(start_sec), "-t", str(duration_sec), "-c", "copy", tmp_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    if os.path.exists(tmp_path):
+        shutil.move(tmp_path, path)
+    else:
+        raise Exception("Cut failed")
 
 async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_text = update.message.text.strip()

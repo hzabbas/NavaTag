@@ -22,6 +22,8 @@ from handlers.admin import (
     set_lock_channel, ADMIN_MENU, BROADCAST_REQUEST, WAITING_LOCK_CHANNEL
 )
 from handlers.youtube import handle_youtube_link, process_youtube_callback
+from handlers.instagram import handle_instagram_link, process_instagram_callback
+from handlers.soundcloud import handle_soundcloud_link, process_soundcloud_callback
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -125,6 +127,16 @@ async def protected_youtube_link(update: Update, context: ContextTypes.DEFAULT_T
         return await handle_youtube_link(update, context)
     return ConversationHandler.END
 
+async def protected_instagram_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_membership(update, context):
+        return await handle_instagram_link(update, context)
+    return ConversationHandler.END
+
+async def protected_soundcloud_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_membership(update, context):
+        return await handle_soundcloud_link(update, context)
+    return ConversationHandler.END
+
 async def auto_check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.chat_member
     if not result: 
@@ -184,14 +196,14 @@ def main():
         ],
         states={
             ADMIN_MENU: [
-                CallbackQueryHandler(admin_callback)
+                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|admin_lock_menu|add_lock_channel|unlock_.*|admin_stats|admin_broadcast|admin_backup|admin_clean|close_panel)$')
             ],
             BROADCAST_REQUEST: [
-                CallbackQueryHandler(admin_callback),
+                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|close_panel)$'),
                 MessageHandler(filters.ALL & ~filters.COMMAND, process_broadcast)
             ],
             WAITING_LOCK_CHANNEL: [
-                CallbackQueryHandler(admin_callback), 
+                CallbackQueryHandler(admin_callback, pattern='^(admin_lock_menu|close_panel)$'), 
                 MessageHandler(filters.TEXT & ~filters.COMMAND, set_lock_channel)
             ]
         },
@@ -199,28 +211,33 @@ def main():
             CommandHandler('cancel', cancel_broadcast),
             CallbackQueryHandler(admin_callback, pattern='^close_panel$')
         ],
+        allow_reentry=True,
         per_message=False
     )
     conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.AUDIO, protected_start_editor),
-            MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/.+'), protected_youtube_link)
+            MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/.+'), protected_youtube_link),
+            MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.)?(instagram\.com|instagr\.am)/.+'), protected_instagram_link),
+            MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.|m\.|on\.)?soundcloud\.com/.+'), protected_soundcloud_link)
         ],
         states={
             SELECT_ACTION: [
                 CallbackQueryHandler(process_youtube_callback, pattern='^ytdl_'),
-                CallbackQueryHandler(handle_button_click)
+                CallbackQueryHandler(process_instagram_callback, pattern='^igdl_'),
+                CallbackQueryHandler(process_soundcloud_callback, pattern='^scdl_'),
+                CallbackQueryHandler(handle_button_click, pattern='^(goto_advanced|goto_main|cancel|done|manage_channels|mode_delete|mode_view|add_new_channel|toggle_ch_.*|del_ch_.*|start_cut|menu_convert|menu_lock|convert_to_voice|convert_.*|pro_clean|toggle_lock_.*|auto_rename|detect_lang|edit_.*)$')
             ],
             WAITING_INPUT: [
-                CallbackQueryHandler(handle_button_click),
+                CallbackQueryHandler(handle_button_click, pattern='^(goto_advanced|goto_main|cancel)$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_new_value)
             ],
             WAITING_COVER: [
-                CallbackQueryHandler(handle_button_click),
+                CallbackQueryHandler(handle_button_click, pattern='^(goto_advanced|goto_main|cancel)$'),
                 MessageHandler(filters.PHOTO, receive_cover)
             ],
             WAITING_CHANNEL: [
-                CallbackQueryHandler(handle_button_click),
+                CallbackQueryHandler(handle_button_click, pattern='^(goto_advanced|goto_main|cancel|mode_view)$'),
                 MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.FORWARDED, receive_channel)
             ],
             ConversationHandler.TIMEOUT: [TypeHandler(Update, handle_timeout)]
@@ -238,17 +255,20 @@ def main():
             CallbackQueryHandler(settings_panel, pattern='^open_settings$')
         ],
         states={
-            SETTINGS_MENU: [CallbackQueryHandler(settings_callback)],
+            SETTINGS_MENU: [
+                CallbackQueryHandler(settings_callback, pattern='^(toggle_language|manage_channels_settings|toggle_ch_set_.*|del_ch_set_.*|mode_delete_settings|mode_view_settings|add_new_channel_settings|back_to_main_settings|close_settings|ignore|toggle_fast_mode|set_preset_.*|back_to_settings)$')
+            ],
             WAITING_PRESET_VALUE: [
-                CallbackQueryHandler(settings_callback), 
+                CallbackQueryHandler(settings_callback, pattern='^(back_to_settings|close_settings)$'), 
                 MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.PHOTO, receive_preset_value)
             ],
             WAITING_SETTINGS_CHANNEL: [
-                CallbackQueryHandler(settings_callback), 
+                CallbackQueryHandler(settings_callback, pattern='^(manage_channels_settings|close_settings)$'), 
                 MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.FORWARDED, receive_channel)
             ]
         },
         fallbacks=[CommandHandler('cancel', cancel_command)], 
+        allow_reentry=True,
         per_message=False
     )
     app.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join_status$'))
