@@ -9,6 +9,7 @@ from handlers.editor import show_panel, safe_delete, cleanup_all_files
 from utils.locales import get_text
 from utils.progress import ProgressBufferedReader, TransferProgress
 from utils.states import SELECT_ACTION
+from utils.task_manager import task_manager, with_task_protection
 
 
 def _get_ig_info(url):
@@ -84,6 +85,7 @@ async def handle_instagram_link(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
 
 
+@with_task_protection("action", release_task_on_error=True)
 async def process_instagram_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
@@ -106,6 +108,9 @@ async def process_instagram_callback(update: Update, context: ContextTypes.DEFAU
         await progress.complete()
     except Exception:
         await status_msg.edit_text(get_text(user_id, 'ig_error'))
+        cleanup_all_files(raw_path)
+        context.user_data.clear()
+        task_manager.end_task(user_id)
         return ConversationHandler.END
 
     context.user_data['chat_id'] = update.effective_chat.id
@@ -158,6 +163,7 @@ async def process_instagram_callback(update: Update, context: ContextTypes.DEFAU
         finally:
             cleanup_all_files(raw_path)
             context.user_data.clear()
+            task_manager.end_task(user_id)
         return ConversationHandler.END
     else:
         await safe_delete(status_msg)

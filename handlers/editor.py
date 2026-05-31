@@ -1,5 +1,6 @@
 import os
 import asyncio
+import glob
 import random
 import subprocess
 import shutil
@@ -23,6 +24,7 @@ from utils.tagger import get_tags, set_tag, set_cover_from_file, delete_all_tags
 from utils.pro_tools import convert_audio, detect_lyrics_lang, generate_standard_filename, smart_clean_tags
 from utils.locales import get_text
 from utils.progress import IndeterminateProgress, ProgressBufferedReader, TransferProgress
+from utils.task_manager import task_manager, with_task_protection
 
 async def safe_delete(message):
     if not message:
@@ -39,12 +41,10 @@ def cleanup_all_files(file_path):
         return
     
     base_path = os.path.splitext(file_path)[0]
-    extensions = ['.mp3', '.ogg', '.wav', '.flac', '.jpg', '.png']
     
-    for ext in extensions:
-        target = base_path + ext
+    for target in glob.glob(f"{glob.escape(base_path)}.*"):
         try:
-            if os.path.exists(target):
+            if os.path.isfile(target) or os.path.islink(target):
                 os.remove(target)
         except OSError as e:
             print(f"Cleanup Error ({target}): {e}")
@@ -65,6 +65,7 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await new_file.download_to_drive(file_path)
     except Exception:
         await progress.cancel()
+        cleanup_all_files(file_path)
         raise
     finally:
         indeterminate.stop()
@@ -98,7 +99,13 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_delete(msg)
 
     if get_fast_mode(user_id):
-        await fast_finish_process(update, context)
+        try:
+            await fast_finish_process(update, context)
+        except Exception:
+            cleanup_all_files(file_path)
+            context.user_data.clear()
+            task_manager.end_task(user_id)
+            raise
         return ConversationHandler.END
 
     await show_panel(update, context, is_first_time=True)
@@ -284,6 +291,7 @@ async def show_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYPE,
         await context.bot.send_message(chat_id, msg_text, reply_markup=reply_markup, parse_mode='Markdown')
 
 
+@with_task_protection("action")
 async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"🔘 Button Clicked: {update.callback_query.data}")
     query = update.callback_query
@@ -295,6 +303,7 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if not file_path and data not in ['goto_main', 'cancel']:
         await query.answer(get_text(user_id, 'bot_reset'), show_alert=True)
+        task_manager.end_task(user_id)
         return ConversationHandler.END
 
     if data == 'goto_advanced':
@@ -314,15 +323,25 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SELECT_ACTION 
 
     if data == 'cancel': 
-        await query.answer(get_text(user_id, 'op_cancelled'))
-        await query.message.delete()
-        if file_path:
-            cleanup_all_files(file_path)
-        context.user_data.clear()
+        try:
+            await query.answer(get_text(user_id, 'op_cancelled'))
+            await query.message.delete()
+        finally:
+            if file_path:
+                cleanup_all_files(file_path)
+            context.user_data.clear()
+            task_manager.end_task(user_id)
         return ConversationHandler.END
 
     if data == 'done': 
-        await finish_process(update, context)
+        try:
+            await finish_process(update, context)
+        finally:
+            file_path = context.user_data.get('file_path')
+            if file_path:
+                cleanup_all_files(file_path)
+            context.user_data.clear()
+            task_manager.end_task(user_id)
         return ConversationHandler.END
 
     if data == 'manage_channels': 
@@ -543,6 +562,7 @@ def _process_cut(path, start_ms, end_ms):
     else:
         raise Exception("Cut failed")
 
+@with_task_protection("action")
 async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_text = update.message.text.strip()
     tag_to_edit = context.user_data.get('current_tag')
@@ -642,6 +662,7 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return SELECT_ACTION
 
+@with_task_protection("action")
 async def receive_cover(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo: return WAITING_COVER
     try: await update.message.delete()
@@ -665,6 +686,7 @@ async def receive_cover(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return SELECT_ACTION
 
+@with_task_protection("action")
 async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     channel_id = None
     channel_title = "Unknown Channel"
@@ -894,8 +916,10 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if file_path:
             cleanup_all_files(file_path)
         context.user_data.clear()
+        task_manager.end_task(user_id)
 
     return ConversationHandler.END
+@with_task_protection("action")
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query
     if not query: return
@@ -959,6 +983,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cleanup_all_files(file_path)
 
     context.user_data.clear()
+    task_manager.end_task(user_id)
 
     msg_text = get_text(user_id, 'cancelled_cleanup')
 
@@ -1008,6 +1033,8 @@ async def handle_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     context.user_data.clear()
+    if user_id:
+        task_manager.end_task(user_id)
     return ConversationHandler.END
 
 async def show_lock_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1146,6 +1173,7 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
         if file_path:
             cleanup_all_files(file_path)
         context.user_data.clear()
+        task_manager.end_task(user_id)
 def get_thumb_path(file_path):
     from mutagen.mp3 import MP3
     from mutagen.id3 import ID3, APIC

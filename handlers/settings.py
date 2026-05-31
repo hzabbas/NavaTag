@@ -3,6 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
 from telegram.error import BadRequest
 from utils.locales import get_text
+from utils.task_manager import with_task_protection
 
 from database.user_service import (
     get_selected_channels, set_fast_mode, get_fast_mode, 
@@ -60,6 +61,7 @@ def get_settings_keyboard(user_id):
     ]
     return InlineKeyboardMarkup(keyboard)
 
+@with_task_protection("action")
 async def settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     msg_text = get_text(user_id, 'settings_menu')
@@ -86,6 +88,7 @@ async def settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return SETTINGS_MENU
 
+@with_task_protection("action")
 async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -204,6 +207,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return SETTINGS_MENU
 
+@with_task_protection("action")
 async def receive_preset_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     tag = context.user_data.get('target_preset')

@@ -15,7 +15,7 @@ from handlers.start import start, initial_language_selection, help_support_callb
 from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
 from handlers.editor import (
     start_editor, handle_button_click, receive_new_value, receive_cover, receive_channel,
-    cancel_command, handle_timeout, inline_query_handler
+    cancel_command, cleanup_all_files, handle_timeout, inline_query_handler
 )
 from handlers.admin import (
     admin_panel, admin_callback, process_broadcast, cancel_broadcast,
@@ -24,6 +24,7 @@ from handlers.admin import (
 from handlers.youtube import handle_youtube_link, process_youtube_callback
 from handlers.instagram import handle_instagram_link, process_instagram_callback
 from handlers.soundcloud import handle_soundcloud_link, process_soundcloud_callback
+from utils.task_manager import mark_entry_point, with_task_protection
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -45,6 +46,7 @@ def clear_downloads():
         except Exception as e:
             pass
 
+@with_task_protection("action")
 async def start_over_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -56,6 +58,7 @@ async def start_over_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode='Markdown'
     )
 
+@with_task_protection("action")
 async def global_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("⚠️ این نشست منقضی شده است.", show_alert=True)
@@ -104,6 +107,7 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.bot_data[f"lock_msg_{user_id}"] = msg.message_id
     return False
 
+@with_task_protection("action")
 async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     is_fully_joined = await check_membership(update, context)
@@ -117,21 +121,34 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await query.answer("❌ هنوز در تمام کانال‌ها عضو نشده‌اید!", show_alert=True)
 
+@with_task_protection("editor")
+@mark_entry_point
 async def protected_start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
-        return await start_editor(update, context)
+        try:
+            return await start_editor(update, context)
+        except Exception:
+            cleanup_all_files(context.user_data.get('file_path'))
+            context.user_data.clear()
+            raise
     return ConversationHandler.END
 
+@with_task_protection("youtube")
+@mark_entry_point
 async def protected_youtube_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
         return await handle_youtube_link(update, context)
     return ConversationHandler.END
 
+@with_task_protection("instagram")
+@mark_entry_point
 async def protected_instagram_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
         return await handle_instagram_link(update, context)
     return ConversationHandler.END
 
+@with_task_protection("soundcloud")
+@mark_entry_point
 async def protected_soundcloud_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
         return await handle_soundcloud_link(update, context)

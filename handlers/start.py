@@ -2,7 +2,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from database.user_service import add_user, has_language_set, set_user_setting
 from utils.locales import get_text
+from utils.task_manager import with_task_protection
 
+@with_task_protection("action")
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE , edit=False):
     user = update.effective_user
     add_user(user.id, user.username, user.full_name)
@@ -43,6 +45,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE , edit=False)
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
 
+@with_task_protection("action")
 async def initial_language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -52,6 +55,7 @@ async def initial_language_selection(update: Update, context: ContextTypes.DEFAU
     await query.answer("✅")
     await start(update, context, edit=True)
 
+@with_task_protection("action")
 async def help_support_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id

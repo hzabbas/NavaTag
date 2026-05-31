@@ -11,6 +11,7 @@ from handlers.editor import cleanup_all_files, safe_delete, show_panel
 from utils.locales import get_text
 from utils.progress import ProgressBufferedReader, TransferProgress
 from utils.states import SELECT_ACTION
+from utils.task_manager import task_manager, with_task_protection
 
 
 def _get_sc_info(url):
@@ -135,6 +136,7 @@ async def handle_soundcloud_link(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
 
 
+@with_task_protection("action", release_task_on_error=True)
 async def process_soundcloud_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
@@ -216,6 +218,7 @@ async def _download_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE,
     else:
         await status_msg.edit_text(get_text(user_id, 'sc_error'))
     context.user_data.clear()
+    task_manager.end_task(user_id)
     return ConversationHandler.END
 
 
@@ -237,6 +240,8 @@ async def _download_track(update: Update, context: ContextTypes.DEFAULT_TYPE, ac
     except Exception:
         cleanup_all_files(raw_path)
         await status_msg.edit_text(get_text(user_id, 'sc_error'))
+        context.user_data.clear()
+        task_manager.end_task(user_id)
         return ConversationHandler.END
 
     context.user_data['chat_id'] = update.effective_chat.id
@@ -291,5 +296,6 @@ async def _download_track(update: Update, context: ContextTypes.DEFAULT_TYPE, ac
     finally:
         cleanup_all_files(raw_path)
         context.user_data.clear()
+        task_manager.end_task(user_id)
 
     return ConversationHandler.END

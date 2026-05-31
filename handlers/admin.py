@@ -3,6 +3,7 @@ import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from config import Config
+from utils.task_manager import with_task_protection
 from database.user_service import (
     get_total_users_count, 
     get_all_users_id, 
@@ -53,6 +54,7 @@ def get_locks_keyboard():
     
     return InlineKeyboardMarkup(keyboard)
 
+@with_task_protection("action")
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != Config.ADMIN_ID:
@@ -65,6 +67,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ADMIN_MENU
 
+@with_task_protection("action")
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -161,6 +164,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.delete()
         return ConversationHandler.END
 
+@with_task_protection("action")
 async def set_lock_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     chat_id = update.effective_chat.id
@@ -240,6 +244,7 @@ async def set_lock_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return WAITING_LOCK_CHANNEL
 
 
+@with_task_protection("action")
 async def process_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != Config.ADMIN_ID: return ConversationHandler.END
