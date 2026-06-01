@@ -60,17 +60,28 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     indeterminate.start()
     
     file_id = update.message.audio.file_id
-    new_file = await context.bot.get_file(file_id)
     unique_hex = os.urandom(8).hex()
     file_path = os.path.join(Config.DOWNLOAD_PATH, f"{update.message.audio.file_unique_id}_{user_id}_{unique_hex}.mp3")
     try:
+        new_file = await context.bot.get_file(file_id)
         await new_file.download_to_drive(file_path)
-    except Exception:
+    except BadRequest:
+        indeterminate.stop()
         await progress.cancel()
         cleanup_all_files(file_path)
+        await safe_delete(msg)
+        await update.message.reply_text("❌ حجم فایل بیشتر از حد مجاز تلگرام (۲۰ مگابایت) است.")
+        task_manager.end_task(user_id)
+        return ConversationHandler.END
+    except Exception:
+        indeterminate.stop()
+        await progress.cancel()
+        cleanup_all_files(file_path)
+        task_manager.end_task(user_id)
         raise
     finally:
-        indeterminate.stop()
+        if indeterminate.is_running:
+            indeterminate.stop()
 
     context.user_data['chat_id'] = update.effective_chat.id
     context.user_data['file_path'] = file_path
