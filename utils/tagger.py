@@ -77,8 +77,8 @@ def apply_tags(file_path, tags_dict):
 def get_tags(file_path):
     
     tags_data = {
-        "title": "Unknown Title", "artist": "Unknown Artist", "album": "Unknown Album",
-        "genre": "Unknown Genre", "year": "----", "track": "0",
+        "title": "", "artist": "", "album": "",
+        "genre": "", "year": "", "track": "",
         "lyrics": "", "comment": "", "has_cover": False,
         "duration": "0:00", "size": "0 MB" 
     }

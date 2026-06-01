@@ -4,7 +4,7 @@ import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from config import Config
-from database.user_service import get_selected_channels
+from database.user_service import get_selected_channels, get_custom_caption
 from handlers.editor import show_panel, safe_delete, cleanup_all_files
 from utils.locales import get_text
 from utils.progress import ProgressBufferedReader, TransferProgress
@@ -110,13 +110,16 @@ async def process_youtube_callback(update: Update, context: ContextTypes.DEFAULT
         context.user_data['title'] = title
         sent_count = 0
         selected_channels = get_selected_channels(user_id)
+        custom_caption = get_custom_caption(user_id)
+        final_caption = custom_caption if custom_caption else None
         try:
             with ProgressBufferedReader(raw_path, progress) as audio_file:
                 await context.bot.send_audio(
                     chat_id=update.effective_chat.id,
                     audio=audio_file,
                     filename=context.user_data['filename'],
-                    caption=get_text(user_id, 'fast_audio_caption'),
+                    caption=final_caption,
+                    parse_mode='Markdown',
                     title=title
                 )
                 for ch_id in selected_channels:
@@ -126,7 +129,8 @@ async def process_youtube_callback(update: Update, context: ContextTypes.DEFAULT
                             chat_id=ch_id,
                             audio=audio_file,
                             filename=context.user_data['filename'],
-                            caption=get_text(user_id, 'channel_caption')
+                            caption=final_caption,
+                            parse_mode='Markdown',
                         )
                         sent_count += 1
                     except Exception:

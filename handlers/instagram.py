@@ -4,40 +4,16 @@ import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from config import Config
-from database.user_service import get_selected_channels
+from database.user_service import get_selected_channels, get_custom_caption
 from handlers.editor import show_panel, safe_delete, cleanup_all_files
 from utils.locales import get_text
 from utils.progress import ProgressBufferedReader, TransferProgress
 from utils.states import SELECT_ACTION
 from utils.task_manager import task_manager, with_task_protection
+from utils.download_manager import DownloadManager
 
 
-def _get_ig_info(url):
-    ydl_opts = {'quiet': True, 'skip_download': True, 'socket_timeout': 15}
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        return ydl.extract_info(url, download=False)
 
-
-def _download_ig(url, quality, output_path, progress=None, loop=None):
-    out_base = output_path.rsplit('.', 1)[0]
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': f'{out_base}.%(ext)s',
-        'writethumbnail': True,
-        'socket_timeout': 15,
-        'postprocessors': [
-            {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': quality},
-            {'key': 'FFmpegMetadata', 'add_metadata': True},
-            {'key': 'EmbedThumbnail', 'already_have_thumbnail': False},
-        ],
-        'postprocessor_args': {'ffmpeg': ['-id3v2_version', '3']},
-        'quiet': True
-    }
-    if progress and loop:
-        ydl_opts['progress_hooks'] = [lambda data: progress.yt_dlp_hook(data, loop)]
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
-    return output_path
 
 
 async def handle_instagram_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -45,7 +21,7 @@ async def handle_instagram_link(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.effective_user.id
     msg = await update.message.reply_text(get_text(user_id, 'ig_fetching'))
     try:
-        info = await asyncio.to_thread(_get_ig_info, url)
+        info = await DownloadManager.fetch_info(url)
         context.user_data['ig_url'] = url
 
         raw_title = info.get('title') or info.get('description') or 'Instagram Post'
@@ -105,7 +81,7 @@ async def process_instagram_callback(update: Update, context: ContextTypes.DEFAU
     file_id = os.urandom(8).hex()
     raw_path = os.path.join(Config.DOWNLOAD_PATH, f"{file_id}.mp3")
     try:
-        await asyncio.to_thread(_download_ig, url, quality, raw_path, progress, loop)
+        await DownloadManager.download_media(url, raw_path, quality, progress, loop)
         await progress.complete()
     except Exception:
         await status_msg.edit_text(get_text(user_id, 'ig_error'))
@@ -127,13 +103,16 @@ async def process_instagram_callback(update: Update, context: ContextTypes.DEFAU
         context.user_data['title'] = title
         sent_count = 0
         selected_channels = get_selected_channels(user_id)
+        custom_caption = get_custom_caption(user_id)
+        final_caption = custom_caption if custom_caption else None
         try:
             with ProgressBufferedReader(raw_path, progress) as audio_file:
                 await context.bot.send_audio(
                     chat_id=update.effective_chat.id,
                     audio=audio_file,
                     filename=context.user_data['filename'],
-                    caption=get_text(user_id, 'fast_audio_caption'),
+                    caption=final_caption,
+                    parse_mode='Markdown',
                     title=title
                 )
                 for ch_id in selected_channels:
@@ -143,7 +122,8 @@ async def process_instagram_callback(update: Update, context: ContextTypes.DEFAU
                             chat_id=ch_id,
                             audio=audio_file,
                             filename=context.user_data['filename'],
-                            caption=get_text(user_id, 'channel_caption')
+                            caption=final_caption,
+                            parse_mode='Markdown',
                         )
                         sent_count += 1
                     except Exception:

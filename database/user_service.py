@@ -44,6 +44,7 @@ def initialize_database():
             CREATE TABLE IF NOT EXISTS user_settings (
                 user_id INTEGER PRIMARY KEY, 
                 fast_mode INTEGER DEFAULT 0,
+                custom_caption TEXT DEFAULT NULL,
                 key TEXT,
                 value TEXT
             );
@@ -55,6 +56,11 @@ def initialize_database():
                 UNIQUE(user_id, tag_name)
             );
         ''')
+       
+        try:
+            cursor.execute('ALTER TABLE user_settings ADD COLUMN custom_caption TEXT DEFAULT NULL;')
+        except sqlite3.OperationalError:
+            pass 
         conn.commit()
 
 def set_fast_mode(user_id, status):
@@ -67,6 +73,24 @@ def set_fast_mode(user_id, status):
 def get_fast_mode(user_id):
     res = _execute('SELECT fast_mode FROM user_settings WHERE user_id = ?', (user_id,), fetch=True)
     return res[0] == 1 if res else False
+
+def set_custom_caption(user_id, caption):
+    if caption is None or caption.strip() == "0":
+        _execute('''
+            INSERT INTO user_settings (user_id, custom_caption) 
+            VALUES (?, NULL) 
+            ON CONFLICT(user_id) DO UPDATE SET custom_caption=NULL
+        ''', (user_id,))
+    else:
+        _execute('''
+            INSERT INTO user_settings (user_id, custom_caption) 
+            VALUES (?, ?) 
+            ON CONFLICT(user_id) DO UPDATE SET custom_caption=excluded.custom_caption
+        ''', (user_id, caption.strip()))
+
+def get_custom_caption(user_id):
+    res = _execute('SELECT custom_caption FROM user_settings WHERE user_id = ?', (user_id,), fetch=True)
+    return res[0] if res and res[0] else None
 
 def set_user_preset(user_id, tag_name, tag_value):
     _execute('INSERT OR REPLACE INTO user_presets (user_id, tag_name, tag_value) VALUES (?, ?, ?)', (user_id, tag_name, tag_value))

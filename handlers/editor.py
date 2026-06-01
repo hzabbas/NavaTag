@@ -18,7 +18,7 @@ from mutagen.id3 import ID3, APIC
 from config import Config
 from database.user_service import (
     add_channel, get_user_channels, toggle_channel_selection, 
-    delete_channel, get_selected_channels, get_user_presets, get_fast_mode
+    delete_channel, get_selected_channels, get_user_presets, get_fast_mode, get_custom_caption
 )
 from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
 from utils.tagger import get_tags, set_tag, set_cover_from_file, delete_all_tags, apply_tags
@@ -66,22 +66,30 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_file = await context.bot.get_file(file_id)
         await new_file.download_to_drive(file_path)
     except BadRequest:
-        indeterminate.stop()
+        try:
+            indeterminate.stop()
+        except Exception:
+            pass
         await progress.cancel()
         cleanup_all_files(file_path)
         await safe_delete(msg)
-        await update.message.reply_text("❌ حجم فایل بیشتر از حد مجاز تلگرام (۲۰ مگابایت) است.")
+        await update.message.reply_text("❌ حجم فایل بیشتر از حد مجاز تلگرام (20 مگابایت) است.")
         task_manager.end_task(user_id)
         return ConversationHandler.END
     except Exception:
-        indeterminate.stop()
+        try:
+            indeterminate.stop()
+        except Exception:
+            pass
         await progress.cancel()
         cleanup_all_files(file_path)
         task_manager.end_task(user_id)
         raise
     finally:
-        if indeterminate.is_running:
+        try:
             indeterminate.stop()
+        except Exception:
+            pass
 
     context.user_data['chat_id'] = update.effective_chat.id
     context.user_data['file_path'] = file_path
@@ -695,7 +703,7 @@ async def receive_cover(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await photo_file.download_to_drive(cover_path)
     file_path = context.user_data.get('file_path')
     
-    success = set_cover_from_file(file_path, cover_path)
+    success = await asyncio.to_thread(set_cover_from_file, file_path, cover_path)
     if os.path.exists(cover_path): os.remove(cover_path)
 
     if success:
@@ -861,24 +869,35 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with ProgressBufferedReader(file_path, progress) as audio_file, ExitStack() as stack:
             thumb_file = stack.enter_context(open(thumb_path, 'rb')) if thumb_path and os.path.exists(thumb_path) else None
             
+            custom_caption = get_custom_caption(user_id)
+            final_caption = custom_caption if custom_caption else None
+
             if is_voice:
                 sent_audio = await query.message.reply_voice(
                     voice=audio_file,
-                    caption=get_text(user_id, 'voice_caption')
+                    caption=final_caption,
+                    parse_mode='Markdown'
                 )
                 if selected_channels:
                     for ch_id in selected_channels:
                         try:
                             audio_file.seek(0)
-                            await context.bot.send_voice(chat_id=ch_id, voice=audio_file)
+                            await context.bot.send_voice(
+                                chat_id=ch_id, 
+                                voice=audio_file, 
+                                caption=final_caption,
+                                parse_mode='Markdown'
+                            )
                             sent_count += 1
                         except: pass
             else:
                 sent_audio = await query.message.reply_audio(
                     audio=audio_file,
                     filename=display_filename,
-                    caption=get_text(user_id, 'audio_caption'),
+                    caption=final_caption,
                     thumbnail=thumb_file,
+                    title=tags.get('title', ''),
+                    performer=tags.get('artist', ''),
                     parse_mode='Markdown'
                 )
                 if selected_channels:
@@ -890,7 +909,11 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 chat_id=ch_id,
                                 audio=audio_file,
                                 filename=display_filename,
-                                thumbnail=thumb_file
+                                caption=final_caption,
+                                thumbnail=thumb_file,
+                                title=tags.get('title', ''),
+                                performer=tags.get('artist', ''),
+                                parse_mode='Markdown'
                             )
                             sent_count += 1
                         except: pass

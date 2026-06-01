@@ -24,6 +24,8 @@ from handlers.admin import (
 from handlers.youtube import handle_youtube_link, process_youtube_callback
 from handlers.instagram import handle_instagram_link, process_instagram_callback
 from handlers.soundcloud import handle_soundcloud_link, process_soundcloud_callback
+from handlers.spotify import handle_spotify_link, process_spotify_callback
+from handlers.tiktok import handle_tiktok_link, process_tiktok_callback
 from utils.task_manager import mark_entry_point, with_task_protection
 
 logging.basicConfig(
@@ -154,6 +156,20 @@ async def protected_soundcloud_link(update: Update, context: ContextTypes.DEFAUL
         return await handle_soundcloud_link(update, context)
     return ConversationHandler.END
 
+@with_task_protection("spotify")
+@mark_entry_point
+async def protected_spotify_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_membership(update, context):
+        return await handle_spotify_link(update, context)
+    return ConversationHandler.END
+
+@with_task_protection("tiktok")
+@mark_entry_point
+async def protected_tiktok_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_membership(update, context):
+        return await handle_tiktok_link(update, context)
+    return ConversationHandler.END
+
 async def auto_check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.chat_member
     if not result: 
@@ -236,12 +252,16 @@ def main():
             MessageHandler(filters.AUDIO, protected_start_editor),
             MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/.+'), protected_youtube_link),
             MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.)?(instagram\.com|instagr\.am)/.+'), protected_instagram_link),
+            MessageHandler(filters.Regex(r'(?i)^(https?://)?(open\.)?spotify\.com/.+'), protected_spotify_link),
+            MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.|vm\.|vt\.)?tiktok\.com/.+'), protected_tiktok_link),
             MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.|m\.|on\.)?soundcloud\.com/.+'), protected_soundcloud_link)
         ],
         states={
             SELECT_ACTION: [
                 CallbackQueryHandler(process_youtube_callback, pattern='^ytdl_'),
                 CallbackQueryHandler(process_instagram_callback, pattern='^igdl_'),
+                CallbackQueryHandler(process_spotify_callback, pattern='^spdl_'),
+                CallbackQueryHandler(process_tiktok_callback, pattern='^tkdl_'),
                 CallbackQueryHandler(process_soundcloud_callback, pattern='^scdl_'),
                 CallbackQueryHandler(handle_button_click, pattern='^(goto_advanced|goto_main|cancel|done|manage_channels|mode_delete|mode_view|add_new_channel|toggle_ch_.*|del_ch_.*|start_cut|menu_convert|menu_lock|convert_to_voice|convert_.*|pro_clean|toggle_lock_.*|auto_rename|detect_lang|edit_.*)$')
             ],

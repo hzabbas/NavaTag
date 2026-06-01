@@ -9,7 +9,7 @@ from database.user_service import (
     get_selected_channels, set_fast_mode, get_fast_mode, 
     set_user_preset, get_user_presets, delete_user_preset, 
     get_user_channels, toggle_channel_selection, delete_channel,
-    get_user_language
+    get_user_language, set_custom_caption, get_custom_caption
 )
 from handlers.start import start
 
@@ -33,6 +33,11 @@ def get_settings_keyboard(user_id):
     selected_ch = get_selected_channels(user_id)
     ch_status = get_text(user_id, 'active_channels').format(count=len(selected_ch)) if selected_ch else get_text(user_id, 'inactive')
     
+    custom_caption = get_custom_caption(user_id)
+    caption_status = "✅ فعال" if custom_caption else get_text(user_id, 'not_set')
+    if get_user_language(user_id) == 'en':
+        caption_status = "✅ Set" if custom_caption else get_text(user_id, 'not_set')
+    
     def tag_status(tag):
         if tag == 'cover':
             return get_text(user_id, 'fixed_cover') if 'has_cover' in presets else get_text(user_id, 'not_set')
@@ -41,6 +46,7 @@ def get_settings_keyboard(user_id):
     keyboard = [
         [InlineKeyboardButton(get_text(user_id, 'fast_mode_btn').format(status=fast_icon), callback_data='toggle_fast_mode')],
         [InlineKeyboardButton(get_text(user_id, 'auto_send_btn').format(status=ch_status), callback_data='manage_channels_settings')],
+        [InlineKeyboardButton(get_text(user_id, 'caption_btn').format(status=caption_status), callback_data='set_preset_caption')],
         [InlineKeyboardButton(get_text(user_id, 'fixed_tags_btn'), callback_data='ignore')],
         [
             InlineKeyboardButton(get_text(user_id, 'artist_btn').format(status=tag_status('artist')), callback_data='set_preset_artist'),
@@ -188,9 +194,11 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if tag == 'cover':
             msg_text = get_text(user_id, 'send_cover')
+        elif tag == 'caption':
+            msg_text = get_text(user_id, 'send_caption')
         else:
             current_val = get_user_presets(user_id).get(tag, '-')
-            msg_text = f"✍️ {tag.upper()} \n\n`{current_val}`\n❌ 'del'"
+            msg_text = f"✍️ {tag.upper()} \n\n`{current_val}`\n❌ ارسال 0 برای حذف"
   
         await query.edit_message_text(
             msg_text,
@@ -220,26 +228,34 @@ async def receive_preset_value(update: Update, context: ContextTypes.DEFAULT_TYP
     if update.message.text:
         text = update.message.text.strip()
         
-        if text.lower() == 'del':
-            delete_user_preset(user_id, tag if tag != 'cover' else 'has_cover')
-            status_text = f"🗑 {tag}"
-        elif tag == 'year':
-            if not text.isdigit() or len(text) != 4:
-                err = await context.bot.send_message(chat_id, "⚠️")
-                await asyncio.sleep(3)
-                await safe_delete(err)
-                return WAITING_PRESET_VALUE 
+        if text == '0' or text.lower() == 'del':
+            if tag == 'caption':
+                set_custom_caption(user_id, None)
+                status_text = "🗑 کپشن پاک شد و حالت خام فعال شد."
+            else:
+                delete_user_preset(user_id, tag if tag != 'cover' else 'has_cover')
+                status_text = f"🗑 تگ {tag} حذف شد."
+        else:
+            if tag == 'caption':
+                set_custom_caption(user_id, text)
+                status_text = "✅ کپشن شما ذخیره شد."
+            elif tag == 'year':
+                if not text.isdigit() or len(text) != 4:
+                    err = await context.bot.send_message(chat_id, "⚠️ سال باید یک عدد ۴ رقمی باشد.")
+                    await asyncio.sleep(3)
+                    await safe_delete(err)
+                    return WAITING_PRESET_VALUE 
+                else:
+                    set_user_preset(user_id, tag, text)
+                    status_text = f"✅ {tag} `{text}`"
             else:
                 set_user_preset(user_id, tag, text)
                 status_text = f"✅ {tag} `{text}`"
-        else:
-            set_user_preset(user_id, tag, text)
-            status_text = f"✅ {tag} `{text}`"
 
     elif update.message.photo and tag == 'cover':
         file_id = update.message.photo[-1].file_id
         set_user_preset(user_id, 'has_cover', file_id)
-        status_text = "✅"
+        status_text = "✅ کاور با موفقیت ذخیره شد."
 
     panel_id = context.user_data.get('settings_panel_id')
     final_text = f"{status_text}\n\n⚙️"
@@ -294,9 +310,9 @@ async def show_settings_channels(update: Update, context: ContextTypes.DEFAULT_T
 
     controls = []
     if mode == 'view':
-        controls.append(InlineKeyboardButton("➕", callback_data='add_new_channel_settings'))
+        controls.append(InlineKeyboardButton("➕ افزودن کانال", callback_data='add_new_channel_settings'))
         if channels:
-            controls.append(InlineKeyboardButton("🗑", callback_data='mode_delete_settings'))
+            controls.append(InlineKeyboardButton("🗑 حذف کانال", callback_data='mode_delete_settings'))
     else:
         controls.append(InlineKeyboardButton(get_text(user_id, 'btn_back'), callback_data='mode_view_settings'))
     
