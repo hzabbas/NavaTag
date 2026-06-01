@@ -213,7 +213,7 @@ def main():
         ],
         states={
             ADMIN_MENU: [
-                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|admin_lock_menu|add_lock_channel|unlock_.*|admin_stats|admin_broadcast|admin_backup|admin_clean|close_panel)$')
+                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|admin_lock_menu|add_lock_channel|unlock_.*|admin_stats|admin_broadcast|admin_backup|admin_clean|admin_restart|close_panel)$')
             ],
             BROADCAST_REQUEST: [
                 CallbackQueryHandler(admin_callback, pattern='^(back_to_main|close_panel)$'),

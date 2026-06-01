@@ -4,6 +4,7 @@ import glob
 import random
 import subprocess
 import shutil
+from contextlib import ExitStack
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, 
     InputMediaPhoto, InlineQueryResultCachedAudio, 
@@ -60,7 +61,8 @@ async def start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     file_id = update.message.audio.file_id
     new_file = await context.bot.get_file(file_id)
-    file_path = os.path.join(Config.DOWNLOAD_PATH, f"{update.message.audio.file_unique_id}.mp3")
+    unique_hex = os.urandom(8).hex()
+    file_path = os.path.join(Config.DOWNLOAD_PATH, f"{update.message.audio.file_unique_id}_{user_id}_{unique_hex}.mp3")
     try:
         await new_file.download_to_drive(file_path)
     except Exception:
@@ -669,7 +671,8 @@ async def receive_cover(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
 
     photo_file = await update.message.photo[-1].get_file()
-    cover_path = os.path.join(Config.DOWNLOAD_PATH, f"cover_{update.message.id}.jpg")
+    unique_hex = os.urandom(4).hex()
+    cover_path = os.path.join(Config.DOWNLOAD_PATH, f"cover_{update.effective_chat.id}_{update.message.id}_{unique_hex}.jpg")
     await photo_file.download_to_drive(cover_path)
     file_path = context.user_data.get('file_path')
     
@@ -836,8 +839,8 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         break
         except: pass
 
-        with ProgressBufferedReader(file_path, progress) as audio_file:
-            thumb_file = open(thumb_path, 'rb') if thumb_path and os.path.exists(thumb_path) else None
+        with ProgressBufferedReader(file_path, progress) as audio_file, ExitStack() as stack:
+            thumb_file = stack.enter_context(open(thumb_path, 'rb')) if thumb_path and os.path.exists(thumb_path) else None
             
             if is_voice:
                 sent_audio = await query.message.reply_voice(
@@ -872,8 +875,6 @@ async def finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             )
                             sent_count += 1
                         except: pass
-            
-            if thumb_file: thumb_file.close()
 
         await progress.complete()
         keyboard = []
@@ -1126,8 +1127,8 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception:
             pass
 
-        with ProgressBufferedReader(file_path, progress) as audio_file:
-            thumb_file = open(thumb_path, 'rb') if thumb_path and os.path.exists(thumb_path) else None
+        with ProgressBufferedReader(file_path, progress) as audio_file, ExitStack() as stack:
+            thumb_file = stack.enter_context(open(thumb_path, 'rb')) if thumb_path and os.path.exists(thumb_path) else None
             
             await context.bot.send_audio(
                 chat_id=update.effective_chat.id,
@@ -1155,8 +1156,6 @@ async def fast_finish_process(update: Update, context: ContextTypes.DEFAULT_TYPE
                         sent_count += 1
                     except Exception:
                         pass
-
-            if thumb_file: thumb_file.close()
             
             await progress.complete()
             if sent_count > 0:

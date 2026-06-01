@@ -128,7 +128,7 @@ def with_task_protection(task_type="action", release_task_on_error=False):
             if is_entry_point:
                 acquired = task_manager.start_task(user_id, str(update.update_id), task_type)
                 if not acquired:
-                    await _send_warning(update, "You already have an active task. Please wait.")
+                    await _send_warning(update, "You already have an active task. Please finish it or type /cancel to abort.")
                     return None
 
             try:
