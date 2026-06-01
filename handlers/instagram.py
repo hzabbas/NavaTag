@@ -13,7 +13,7 @@ from utils.task_manager import task_manager, with_task_protection
 
 
 def _get_ig_info(url):
-    ydl_opts = {'quiet': True, 'skip_download': True}
+    ydl_opts = {'quiet': True, 'skip_download': True, 'socket_timeout': 15}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False)
 
@@ -24,6 +24,7 @@ def _download_ig(url, quality, output_path, progress=None, loop=None):
         'format': 'bestaudio/best',
         'outtmpl': f'{out_base}.%(ext)s',
         'writethumbnail': True,
+        'socket_timeout': 15,
         'postprocessors': [
             {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': quality},
             {'key': 'FFmpegMetadata', 'add_metadata': True},

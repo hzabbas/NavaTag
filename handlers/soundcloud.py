@@ -20,6 +20,7 @@ def _get_sc_info(url):
         'skip_download': True,
         'extract_flat': 'in_playlist',
         'cachedir': False,
+        'socket_timeout': 15,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False)
@@ -32,6 +33,7 @@ def _download_sc(url, quality, output_path, progress=None, loop=None):
         'outtmpl': f'{out_base}.%(ext)s',
         'writethumbnail': True,
         'cachedir': False,
+        'socket_timeout': 15,
         'postprocessors': [
             {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': quality},
             {'key': 'FFmpegMetadata', 'add_metadata': True},

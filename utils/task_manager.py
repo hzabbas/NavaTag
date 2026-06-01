@@ -63,27 +63,28 @@ class TaskManager:
         if user_id is None:
             return False
 
+        now = self._clock()
         with self._lock:
             if user_id in self.active_tasks:
-                return False
+                # Evict orphaned tasks older than 1 hour
+                if now - self.active_tasks[user_id].get("start", 0) > 3600:
+                    del self.active_tasks[user_id]
+                else:
+                    return False
             self.active_tasks[user_id] = {
                 "id": task_id,
                 "type": task_type,
-                "start": self._clock(),
+                "start": now,
             }
             return True
-
+    
     def end_task(self, user_id):
         if user_id is None:
             return
 
         with self._lock:
             self.active_tasks.pop(user_id, None)
-
-
-task_manager = TaskManager()
-
-
+        
 def mark_entry_point(func):
     func._is_entry_point = True
     return func
@@ -140,10 +141,13 @@ def with_task_protection(task_type="action", release_task_on_error=False):
                     task_manager.end_task(user_id)
                 raise
 
-            if acquired and result == ConversationHandler.END:
+            # Always release task on terminal ConversationHandler.END regardless of acquisition state
+            if result == ConversationHandler.END:
                 task_manager.end_task(user_id)
             return result
 
         return wrapper
 
     return decorator
+ 
+task_manager = TaskManager()

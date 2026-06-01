@@ -581,24 +581,27 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tag_to_edit = context.user_data.get('current_tag')
     file_path = context.user_data.get('file_path')
 
-    try: await update.message.delete()
-    except: pass
+    # Delete the incoming message once (safe deletion)
+    try:
+        await update.message.delete()
+    except BadRequest:
+        pass
+    except Exception:
+        pass
 
-
-    current_tag = context.user_data.get('current_tag')
-    text = update.message.text.strip()
-
-    if current_tag == 'cut_audio':
+    if tag_to_edit == 'cut_audio':
+        # remove previous prompt message if any
         old_msg_id = context.user_data.get('msg_to_delete')
         if old_msg_id:
-            try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_msg_id)
-            except BadRequest: pass
-
-        try: await update.message.delete()
-        except BadRequest: pass
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_msg_id)
+            except BadRequest:
+                pass
+            except Exception:
+                pass
 
         try:
-            start_str, end_str = text.split('-')
+            start_str, end_str = new_text.split('-')
             def get_ms(time_str):
                 m, s = map(int, time_str.split(':'))
                 return (m * 60 + s) * 1000
@@ -606,25 +609,26 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             start_ms = get_ms(start_str)
             end_ms = get_ms(end_str)
 
-            file_path = context.user_data.get('file_path')
-            
             status_msg = await update.message.reply_text("🚀 Initiating...")
             progress = TransferProgress(context.bot, update.effective_chat.id, status_msg.message_id, "Processing", "Audio Cut", "Unknown", "FFmpeg")
             progress.status = "Cutting audio segment..."
             indeterminate = IndeterminateProgress(progress)
             indeterminate.start()
+
             try:
                 await asyncio.to_thread(_process_cut, file_path, start_ms, end_ms)
                 await progress.complete()
             except Exception:
                 await progress.cancel()
-                raise
+                err = await update.effective_chat.send_message("❌ خطا در پردازش صدا!")
+                context.user_data['msg_to_delete'] = err.message_id
+                return WAITING_INPUT
             finally:
                 indeterminate.stop()
+
             await asyncio.sleep(1)
             await safe_delete(status_msg)
-            temp_ok = await update.message.reply_text("✅ برش با موفقیت انجام شد!")
-            
+            temp_ok = await update.effective_chat.send_message("✅ برش با موفقیت انجام شد!")
             await asyncio.sleep(2)
             await safe_delete(temp_ok)
 
@@ -632,13 +636,15 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return SELECT_ACTION
 
         except Exception:
-            err = await update.message.reply_text("❌ خطا در فرمت یا بازه نامعتبر! دوباره تلاش کنید.")
+            err = await update.effective_chat.send_message("❌ خطا در فرمت یا بازه نامعتبر! دوباره تلاش کنید.")
             context.user_data['msg_to_delete'] = err.message_id
-            return WAITING_INPUT     
+            return WAITING_INPUT
+
     if tag_to_edit == 'filename':
-        if not new_text.lower().endswith(".mp3"): new_text += ".mp3"
+        if not new_text.lower().endswith(".mp3"):
+            new_text += ".mp3"
         context.user_data['filename'] = new_text
-        msg = await update.message.reply_text(f"✅ نام فایل شد: {new_text}")
+        msg = await update.effective_chat.send_message(f"✅ نام فایل شد: {new_text}")
         await asyncio.sleep(2)
         await safe_delete(msg)
         await show_advanced_panel(update, context)
@@ -646,9 +652,11 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     error_msg = None
     if tag_to_edit == 'year':
-        if not new_text.isdigit() or len(new_text) != 4: error_msg = "❌ سال باید ۴ رقمی باشد."
+        if not new_text.isdigit() or len(new_text) != 4:
+            error_msg = "❌ سال باید ۴ رقمی باشد."
     elif tag_to_edit == 'track':
-        if not new_text.isdigit(): error_msg = "❌ شماره ترک باید عدد باشد."
+        if not new_text.isdigit():
+            error_msg = "❌ شماره ترک باید عدد باشد."
 
     if error_msg:
         formatted_error = (
@@ -657,7 +665,7 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{error_msg}\n"
             f"♻️ لطفاً مجدداً مقدار صحیح را ارسال کنید."
         )
-        msg = await update.message.reply_text(formatted_error, parse_mode='Markdown')
+        msg = await update.effective_chat.send_message(formatted_error, parse_mode='Markdown')
         await asyncio.sleep(4)
         await safe_delete(msg)
         return WAITING_INPUT
@@ -669,7 +677,7 @@ async def receive_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['changes'].append(tag_to_edit)
         await show_panel(update, context)
     else:
-        msg = await update.message.reply_text("❌ خطا در ویرایش.")
+        msg = await update.effective_chat.send_message("❌ خطا در ویرایش.")
         await asyncio.sleep(3)
         await safe_delete(msg)
 
