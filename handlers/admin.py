@@ -15,7 +15,8 @@ from database.user_service import (
     is_banned,
     get_user_report,
     get_advanced_global_stats,
-    get_user_info
+    get_user_info,
+    get_today_users
 )
 
 ADMIN_MENU, BROADCAST_REQUEST, WAITING_LOCK_CHANNEL, WAITING_USER_ID, WAITING_DIRECT_MESSAGE = range(5)
@@ -38,11 +39,20 @@ def get_admin_keyboard():
             InlineKeyboardButton("🧹 پاکسازی موقت", callback_data='admin_clean')
         ],
         [
-            InlineKeyboardButton("🔄 ری‌استارت سیستم", callback_data='admin_restart'),
+            InlineKeyboardButton("🆕 کاربران امروز", callback_data='admin_today_users'),
+            InlineKeyboardButton("🔄 ری‌استارت سیستم", callback_data='admin_restart')
+        ],
+        [
             InlineKeyboardButton("❌ خروج", callback_data='close_panel')
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def escape_md(text):
+    if not text:
+        return ""
+    return str(text).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
 
 
 async def show_user_profile(query, user_id):
@@ -51,14 +61,15 @@ async def show_user_profile(query, user_id):
     banned = is_banned(user_id)
     status_text = "🔴 مسدود" if banned else "🟢 فعال"
 
-    u_name = user_info[0] if user_info and user_info[0] else "ندارد"
-    f_name = user_info[1] if user_info and user_info[1] else "ناشناس"
+    u_name = escape_md(user_info[0]) if user_info and user_info[0] else "ندارد"
+    f_name = escape_md(user_info[1]) if user_info and user_info[1] else "ناشناس"
     j_date = user_info[2][:10] if user_info and user_info[2] else "نامشخص"
     
     history = ""
     if recent_acts:
         for act in recent_acts:
-            history += f"▪️ {act[0]} : {act[1][:25]}\n"
+            safe_detail = escape_md(act[1][:25])
+            history += f"▪️ {act[0]} : {safe_detail}\n"
     else:
         history = "بدون سابقه"
 
@@ -94,7 +105,7 @@ async def process_user_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         pass
     
     if not user_id_text.isdigit():
-        msg = await update.message.reply_text("❌ فرمت نامعتبر! شناسه باید عددی باشد.")
+        msg = await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ فرمت نامعتبر! شناسه باید عددی باشد.")
         await asyncio.sleep(2)
         try:
             await msg.delete()
@@ -104,7 +115,7 @@ async def process_user_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         
     class DummyQuery:
         async def edit_message_text(self, text, reply_markup, parse_mode):
-            await update.message.reply_text(text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
             
     return await show_user_profile(DummyQuery(), int(user_id_text))
 
@@ -187,6 +198,24 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("🗑 کانال از لیست قفل حذف شد.", show_alert=True)
         await query.edit_message_reply_markup(reply_markup=get_locks_keyboard())
         return ADMIN_MENU
+    if data == 'admin_today_users':
+        today_users = get_today_users()
+        if not today_users:
+            await query.answer("هیچ کاربری امروز اضافه نشده است.", show_alert=True)
+            return ADMIN_MENU
+        
+        text = "🆕 **کاربران جدید امروز:**\n\n"
+        for uid, fname, uname in today_users[:50]:
+            safe_fname = escape_md(fname)
+            safe_uname = escape_md(uname) if uname else 'ندارد'
+            text += f"▪️ {safe_fname} (`{uid}`) - @{safe_uname}\n"
+        
+        await query.edit_message_text(
+            text=text,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data='back_to_main')]]),
+            parse_mode='Markdown'
+        )
+        return ADMIN_MENU
     if data == 'admin_restart':
         await query.answer("⚡ در حال ری‌استارت آنی ربات...", show_alert=True)
         try:
@@ -197,7 +226,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == 'admin_stats':
         count = get_total_users_count()
         try:
-            folder_size = sum(os.path.getsize(os.path.join('downloads', f)) for f in os.listdir('downloads') if os.path.isfile(os.path.join('downloads', f)))
+            folder_size = sum(os.path.getsize(os.path.join(Config.DOWNLOAD_PATH, f)) for f in os.listdir(Config.DOWNLOAD_PATH) if os.path.isfile(os.path.join(Config.DOWNLOAD_PATH, f)))
             folder_size_mb = folder_size / (1024 * 1024)
         except:
             folder_size_mb = 0
@@ -282,7 +311,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ADMIN_MENU
     elif data == 'admin_clean':
         await query.answer("در حال پاکسازی...")
-        folder = 'downloads'
+        folder = Config.DOWNLOAD_PATH
         try:
             for f in os.listdir(folder):
                 os.unlink(os.path.join(folder, f))

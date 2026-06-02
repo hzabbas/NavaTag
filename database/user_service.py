@@ -5,13 +5,16 @@ DB_PATH = 'bot_database.db'
 def _execute(query, params=(), fetch=False, fetchall=False):
     with sqlite3.connect(DB_PATH, timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(query, params)
-        if fetch:
-            return cursor.fetchone()
-        if fetchall:
-            return cursor.fetchall()
-        conn.commit()
-        return cursor.rowcount
+        try:
+            cursor.execute(query, params)
+            if fetch:
+                return cursor.fetchone()
+            if fetchall:
+                return cursor.fetchall()
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            cursor.close()
 
 def initialize_database():
     with sqlite3.connect(DB_PATH, timeout=10) as conn:
@@ -227,3 +230,6 @@ def get_advanced_global_stats():
     total = _execute('SELECT COUNT(*) FROM activity_log', fetch=True)[0]
     today = _execute('SELECT COUNT(*) FROM activity_log WHERE created_at = CURRENT_DATE', fetch=True)[0]
     return today, total
+
+def get_today_users():
+    return _execute("SELECT user_id, full_name, username FROM users WHERE DATE(join_date) = CURRENT_DATE", fetchall=True) or []

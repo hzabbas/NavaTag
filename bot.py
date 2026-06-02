@@ -9,7 +9,7 @@ from telegram.ext import (
     InlineQueryHandler, TypeHandler, Application, ChatMemberHandler
 )
 from config import Config
-from database.user_service import initialize_database, get_locked_channels
+from database.user_service import initialize_database, get_locked_channels, log_activity
 from handlers.settings import settings_panel, settings_callback, receive_preset_value, SETTINGS_MENU, WAITING_PRESET_VALUE, WAITING_SETTINGS_CHANNEL   
 from handlers.start import start, initial_language_selection, help_support_callback
 from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
@@ -36,7 +36,7 @@ logging.basicConfig(
 )
 
 def clear_downloads():
-    folder = 'downloads'
+    folder = Config.DOWNLOAD_PATH
     if not os.path.exists(folder):
         os.makedirs(folder)
         return
@@ -130,6 +130,7 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def protected_start_editor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
         try:
+            log_activity(update.effective_user.id, "File", "Audio File")
             return await start_editor(update, context)
         except Exception:
             cleanup_all_files(context.user_data.get('file_path'))
@@ -141,6 +142,7 @@ async def protected_start_editor(update: Update, context: ContextTypes.DEFAULT_T
 @mark_entry_point
 async def protected_youtube_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
+        log_activity(update.effective_user.id, "Link", "YouTube")
         return await handle_youtube_link(update, context)
     return ConversationHandler.END
 
@@ -148,6 +150,7 @@ async def protected_youtube_link(update: Update, context: ContextTypes.DEFAULT_T
 @mark_entry_point
 async def protected_instagram_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
+        log_activity(update.effective_user.id, "Link", "Instagram")
         return await handle_instagram_link(update, context)
     return ConversationHandler.END
 
@@ -155,6 +158,7 @@ async def protected_instagram_link(update: Update, context: ContextTypes.DEFAULT
 @mark_entry_point
 async def protected_soundcloud_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
+        log_activity(update.effective_user.id, "Link", "SoundCloud")
         return await handle_soundcloud_link(update, context)
     return ConversationHandler.END
 
@@ -162,6 +166,7 @@ async def protected_soundcloud_link(update: Update, context: ContextTypes.DEFAUL
 @mark_entry_point
 async def protected_spotify_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
+        log_activity(update.effective_user.id, "Link", "Spotify")
         return await handle_spotify_link(update, context)
     return ConversationHandler.END
 
@@ -169,6 +174,7 @@ async def protected_spotify_link(update: Update, context: ContextTypes.DEFAULT_T
 @mark_entry_point
 async def protected_tiktok_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_membership(update, context):
+        log_activity(update.effective_user.id, "Link", "TikTok")
         return await handle_tiktok_link(update, context)
     return ConversationHandler.END
 
@@ -242,25 +248,29 @@ async def handle_user_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     initialize_database()
     clear_downloads()
+
+    builder = ApplicationBuilder().token(Config.BOT_TOKEN)
+
+    if Config.USE_LOCAL_API:
+        builder = builder.base_url(f"{Config.LOCAL_API_URL}/bot")
+        builder = builder.base_file_url(f"{Config.LOCAL_API_URL}/file/bot")
+        builder = builder.local_mode(True)
+
     app = (
-            ApplicationBuilder()
-            .token(Config.BOT_TOKEN)
-            .base_url("http://127.0.0.1:8081/bot")
-            .base_file_url("http://127.0.0.1:8081/file/bot")
-            .local_mode(True)
-            .read_timeout(30) 
-            .write_timeout(30) 
-            .connect_timeout(30)
-            .pool_timeout(30)
-            .build()
-        )
+        builder
+        .read_timeout(30)
+        .write_timeout(30)
+        .connect_timeout(30)
+        .pool_timeout(30)
+        .build()
+    )
     admin_conv = ConversationHandler(
         entry_points=[
             CommandHandler('admin', admin_panel)
         ],
         states={
             ADMIN_MENU: [
-                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|admin_lock_menu|add_lock_channel|unlock_.*|admin_stats|admin_adv_stats|admin_search_user|admin_broadcast|admin_backup|admin_clean|admin_restart|close_panel|ban_.*|unban_.*|msguser_.*)$')
+                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|admin_lock_menu|add_lock_channel|unlock_.*|admin_stats|admin_adv_stats|admin_search_user|admin_broadcast|admin_backup|admin_clean|admin_restart|close_panel|ban_.*|unban_.*|msguser_.*|admin_today_users)$')
             ],
             BROADCAST_REQUEST: [
                 CallbackQueryHandler(admin_callback, pattern='^(back_to_main|close_panel)$'),
