@@ -213,6 +213,32 @@ async def auto_check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception: 
             pass
 
+async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != Config.ADMIN_ID:
+        return
+    reply_to = update.message.reply_to_message
+    if not reply_to:
+        return
+    target_info = context.bot_data.get(f"msg_{reply_to.message_id}")
+    if not target_info:
+        return
+    user_id, _ = target_info
+    try:
+        await context.bot.copy_message(chat_id=user_id, from_chat_id=update.effective_chat.id, message_id=update.message.message_id)
+    except Exception:
+        pass
+
+async def handle_user_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id == Config.ADMIN_ID:
+        return
+    if not update.message.reply_to_message:
+        return
+    try:
+        fwd = await context.bot.forward_message(chat_id=Config.ADMIN_ID, from_chat_id=update.effective_chat.id, message_id=update.message.message_id)
+        context.bot_data[f"msg_{fwd.message_id}"] = (update.effective_user.id, update.message.message_id)
+    except Exception:
+        pass
+
 def main():
     initialize_database()
     clear_downloads()
@@ -322,6 +348,8 @@ def main():
         per_message=False
     )
     app.add_handler(TypeHandler(Update, spam_middleware), group=-1)
+    app.add_handler(MessageHandler(filters.Chat(Config.ADMIN_ID) & filters.REPLY, handle_admin_reply))
+    app.add_handler(MessageHandler(~filters.Chat(Config.ADMIN_ID) & filters.REPLY & ~filters.COMMAND, handle_user_msg))
     app.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join_status$'))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(initial_language_selection, pattern='^set_lang_'))
