@@ -17,9 +17,11 @@ from handlers.editor import (
     start_editor, handle_button_click, receive_new_value, receive_cover, receive_channel,
     cancel_command, cleanup_all_files, handle_timeout, inline_query_handler
 )
+from utils.anti_spam import spam_middleware
 from handlers.admin import (
     admin_panel, admin_callback, process_broadcast, cancel_broadcast,
-    set_lock_channel, ADMIN_MENU, BROADCAST_REQUEST, WAITING_LOCK_CHANNEL
+    set_lock_channel, process_user_search, send_direct_message,
+    ADMIN_MENU, BROADCAST_REQUEST, WAITING_LOCK_CHANNEL, WAITING_USER_ID, WAITING_DIRECT_MESSAGE
 )
 from handlers.youtube import handle_youtube_link, process_youtube_callback
 from handlers.instagram import handle_instagram_link, process_instagram_callback
@@ -215,21 +217,24 @@ def main():
     initialize_database()
     clear_downloads()
     app = (
-        ApplicationBuilder()
-        .token(Config.BOT_TOKEN)
-        .read_timeout(30) 
-        .write_timeout(30) 
-        .connect_timeout(30)
-        .pool_timeout(30)
-        .build()
-    )
+            ApplicationBuilder()
+            .token(Config.BOT_TOKEN)
+            .base_url("http://127.0.0.1:8081/bot")
+            .base_file_url("http://127.0.0.1:8081/file/bot")
+            .local_mode(True)
+            .read_timeout(30) 
+            .write_timeout(30) 
+            .connect_timeout(30)
+            .pool_timeout(30)
+            .build()
+        )
     admin_conv = ConversationHandler(
         entry_points=[
             CommandHandler('admin', admin_panel)
         ],
         states={
             ADMIN_MENU: [
-                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|admin_lock_menu|add_lock_channel|unlock_.*|admin_stats|admin_broadcast|admin_backup|admin_clean|admin_restart|close_panel)$')
+                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|admin_lock_menu|add_lock_channel|unlock_.*|admin_stats|admin_adv_stats|admin_search_user|admin_broadcast|admin_backup|admin_clean|admin_restart|close_panel|ban_.*|unban_.*|msguser_.*)$')
             ],
             BROADCAST_REQUEST: [
                 CallbackQueryHandler(admin_callback, pattern='^(back_to_main|close_panel)$'),
@@ -238,6 +243,14 @@ def main():
             WAITING_LOCK_CHANNEL: [
                 CallbackQueryHandler(admin_callback, pattern='^(admin_lock_menu|close_panel)$'), 
                 MessageHandler(filters.TEXT & ~filters.COMMAND, set_lock_channel)
+            ],
+            WAITING_USER_ID: [
+                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|close_panel)$'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, process_user_search)
+            ],
+            WAITING_DIRECT_MESSAGE: [
+                CallbackQueryHandler(admin_callback, pattern='^(back_to_main|close_panel)$'),
+                MessageHandler(filters.ALL & ~filters.COMMAND, send_direct_message)
             ]
         },
         fallbacks=[
@@ -308,6 +321,7 @@ def main():
         allow_reentry=True,
         per_message=False
     )
+    app.add_handler(TypeHandler(Update, spam_middleware), group=-1)
     app.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join_status$'))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(initial_language_selection, pattern='^set_lang_'))

@@ -9,10 +9,16 @@ from database.user_service import (
     get_all_users_id, 
     add_locked_channel, 
     remove_locked_channel, 
-    get_locked_channels
+    get_locked_channels,
+    ban_user,
+    unban_user,
+    is_banned,
+    get_user_report,
+    get_advanced_global_stats,
+    get_user_info
 )
 
-ADMIN_MENU, BROADCAST_REQUEST, WAITING_LOCK_CHANNEL = range(3)
+ADMIN_MENU, BROADCAST_REQUEST, WAITING_LOCK_CHANNEL, WAITING_USER_ID, WAITING_DIRECT_MESSAGE = range(5)
 
 
 def get_admin_keyboard():
@@ -20,22 +26,87 @@ def get_admin_keyboard():
     lock_status = f"{len(locks)} کانال" if locks else "❌ غیرفعال"
     keyboard = [
         [
-            InlineKeyboardButton("📊 آمار و ارقام ربات", callback_data='admin_stats'),
-            InlineKeyboardButton(f"🔒 قفل جوین ({lock_status})", callback_data='admin_lock_menu')
+            InlineKeyboardButton("📊 آمار پیشرفته", callback_data='admin_adv_stats'),
+            InlineKeyboardButton("👤 مدیریت کاربران", callback_data='admin_search_user')
         ],
         [
-            InlineKeyboardButton("📢 ارسال پیام همگانی", callback_data='admin_broadcast'),
-            InlineKeyboardButton("📥 پشتیبان‌گیری دیتابیس", callback_data='admin_backup')
+            InlineKeyboardButton(f"🔒 قفل جوین ({lock_status})", callback_data='admin_lock_menu'),
+            InlineKeyboardButton("📢 ارسال همگانی", callback_data='admin_broadcast')
         ],
         [
-            InlineKeyboardButton("🧹 پاکسازی فایل‌های سرور", callback_data='admin_clean'),
-            InlineKeyboardButton("🔄 ری‌استارت آنی ربات", callback_data='admin_restart')
+            InlineKeyboardButton("📥 بکاپ دیتابیس", callback_data='admin_backup'),
+            InlineKeyboardButton("🧹 پاکسازی موقت", callback_data='admin_clean')
         ],
         [
-            InlineKeyboardButton("❌ بستن پنل مدیریت", callback_data='close_panel')
+            InlineKeyboardButton("🔄 ری‌استارت سیستم", callback_data='admin_restart'),
+            InlineKeyboardButton("❌ خروج", callback_data='close_panel')
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+async def show_user_profile(query, user_id):
+    user_info = get_user_info(user_id)
+    total_acts, recent_acts = get_user_report(user_id)
+    banned = is_banned(user_id)
+    status_text = "🔴 مسدود" if banned else "🟢 فعال"
+
+    u_name = user_info[0] if user_info and user_info[0] else "ندارد"
+    f_name = user_info[1] if user_info and user_info[1] else "ناشناس"
+    j_date = user_info[2][:10] if user_info and user_info[2] else "نامشخص"
+    
+    history = ""
+    if recent_acts:
+        for act in recent_acts:
+            history += f"▪️ {act[0]} : {act[1][:25]}\n"
+    else:
+        history = "بدون سابقه"
+
+    profile_text = (
+        "⚜️ **پرونده جامع کاربر** ⚜️\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 نام: {f_name}\n"
+        f"🔗 یوزرنیم: @{u_name}\n"
+        f"🆔 شناسه: `{user_id}`\n"
+        f"📅 تاریخ عضویت: {j_date}\n"
+        f"🛡 وضعیت: {status_text}\n"
+        f"🗄 کل پردازش‌ها: {total_acts}\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "آخرین فعالیت‌ها:\n"
+        f"{history}"
+    )
+    
+    btn = InlineKeyboardButton("✅ رفع مسدودی", callback_data=f"unban_{user_id}") if banned else InlineKeyboardButton("🚫 مسدود کردن", callback_data=f"ban_{user_id}")
+    keyboard = [
+        [btn, InlineKeyboardButton("✉️ ارسال پیام", callback_data=f"msguser_{user_id}")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data='back_to_main')]
+    ]
+    
+    await query.edit_message_text(text=profile_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    return ADMIN_MENU
+
+
+async def process_user_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id_text = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except:
+        pass
+    
+    if not user_id_text.isdigit():
+        msg = await update.message.reply_text("❌ فرمت نامعتبر! شناسه باید عددی باشد.")
+        await asyncio.sleep(2)
+        try:
+            await msg.delete()
+        except:
+            pass
+        return WAITING_USER_ID
+        
+    class DummyQuery:
+        async def edit_message_text(self, text, reply_markup, parse_mode):
+            await update.message.reply_text(text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+            
+    return await show_user_profile(DummyQuery(), int(user_id_text))
 
 
 def get_locks_keyboard():
@@ -151,6 +222,51 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
              parse_mode='Markdown'
         )
         return ADMIN_MENU
+
+    if data == 'admin_adv_stats':
+        users_count = get_total_users_count()
+        today_acts, total_acts = get_advanced_global_stats()
+        stats_text = (
+            "⚜️ **سیستم مانیتورینگ نواتگ** ⚜️\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"👥 کل کاربران: {users_count}\n"
+            f"📈 پردازش‌های امروز: {today_acts}\n"
+            f"🗄 کل پردازش‌های سیستم: {total_acts}\n"
+            "━━━━━━━━━━━━━━━━━━━━"
+        )
+        await query.edit_message_text(text=stats_text, reply_markup=get_admin_keyboard(), parse_mode='Markdown')
+        return ADMIN_MENU
+
+    if data == 'admin_search_user':
+        await query.edit_message_text(
+            "🔎 **جستجوی کاربر**\n\nلطفاً شناسه عددی کاربر را ارسال کنید:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data='back_to_main')]]),
+            parse_mode='Markdown'
+        )
+        return WAITING_USER_ID
+
+    if data.startswith('ban_'):
+        target_id = int(data.split('_')[1])
+        ban_user(target_id)
+        await query.answer("کاربر مسدود شد", show_alert=True)
+        return await show_user_profile(query, target_id)
+
+    if data.startswith('unban_'):
+        target_id = int(data.split('_')[1])
+        unban_user(target_id)
+        await query.answer("محدودیت رفع شد", show_alert=True)
+        return await show_user_profile(query, target_id)
+
+    if data.startswith('msguser_'):
+        target_id = int(data.split('_')[1])
+        context.user_data['target_dm_id'] = target_id
+        await query.edit_message_text(
+            "✉️ **ارسال پیام مستقیم**\n\nلطفاً پیام خود را بفرستید تا از طرف ربات به کاربر ارسال شود:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data='back_to_main')]]),
+            parse_mode='Markdown'
+        )
+        return WAITING_DIRECT_MESSAGE
+
     elif data == 'admin_broadcast':
         await query.answer()
         await query.edit_message_text(
@@ -291,4 +407,16 @@ async def process_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("لغو شد.", reply_markup=get_admin_keyboard())
+    return ADMIN_MENU
+
+
+async def send_direct_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target_id = context.user_data.get('target_dm_id')
+    if not target_id:
+        return ADMIN_MENU
+    try:
+        await update.message.copy(chat_id=target_id)
+        await update.message.reply_text("✅ پیام با موفقیت ارسال شد.", reply_markup=get_admin_keyboard())
+    except Exception:
+        await update.message.reply_text("❌ ارسال پیام ناموفق بود (احتمالاً کاربر ربات را بلاک کرده است).", reply_markup=get_admin_keyboard())
     return ADMIN_MENU

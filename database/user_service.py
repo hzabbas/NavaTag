@@ -55,6 +55,16 @@ def initialize_database():
                 tag_value TEXT, 
                 UNIQUE(user_id, tag_name)
             );
+            CREATE TABLE IF NOT EXISTS banned_users (
+                user_id INTEGER PRIMARY KEY
+            );
+            CREATE TABLE IF NOT EXISTS activity_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                act_type TEXT,
+                detail TEXT,
+                created_at DATE DEFAULT CURRENT_DATE
+            );
         ''')
        
         try:
@@ -180,6 +190,40 @@ def has_language_set(user_id):
     res = _execute('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', (user_id, 'language'), fetch=True)
     return bool(res)
 
+
 def get_user_language(user_id):
     res = _execute('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', (user_id, 'language'), fetch=True)
     return res[0] if res else 'fa'
+
+
+def get_user_info(user_id):
+    return _execute('SELECT username, full_name, join_date FROM users WHERE user_id = ?', (int(user_id),), fetch=True)
+
+
+def ban_user(user_id):
+    _execute('INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)', (int(user_id),))
+
+
+def unban_user(user_id):
+    _execute('DELETE FROM banned_users WHERE user_id = ?', (int(user_id),))
+
+
+def is_banned(user_id):
+    res = _execute('SELECT user_id FROM banned_users WHERE user_id = ?', (int(user_id),), fetch=True)
+    return bool(res)
+
+
+def log_activity(user_id, act_type, detail):
+    _execute('INSERT INTO activity_log (user_id, act_type, detail) VALUES (?, ?, ?)', (int(user_id), act_type, detail))
+
+
+def get_user_report(user_id):
+    total = _execute('SELECT COUNT(*) FROM activity_log WHERE user_id = ?', (int(user_id),), fetch=True)[0]
+    recent = _execute('SELECT act_type, detail FROM activity_log WHERE user_id = ? ORDER BY id DESC LIMIT 5', (int(user_id),), fetchall=True)
+    return total, recent or []
+
+
+def get_advanced_global_stats():
+    total = _execute('SELECT COUNT(*) FROM activity_log', fetch=True)[0]
+    today = _execute('SELECT COUNT(*) FROM activity_log WHERE created_at = CURRENT_DATE', fetch=True)[0]
+    return today, total

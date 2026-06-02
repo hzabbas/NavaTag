@@ -985,7 +985,7 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 InlineQueryResultCachedAudio(
                     id=str(os.urandom(8)),
                     audio_file_id=clean_id,
-                    caption="🔥 Edited by Music Bot"
+                    caption="🔥 Edited by @NavaTagbot"
                 )
             )
 

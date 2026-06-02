@@ -34,7 +34,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE , edit=False)
              InlineKeyboardButton(get_text(user.id, 'settings_btn'), callback_data='open_settings') 
         ],
         [
-            InlineKeyboardButton(get_text(user.id, 'support_btn'), callback_data='support')
+            InlineKeyboardButton(get_text(user.id, 'support_btn'), url='https://t.me/A_HZ81')
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
