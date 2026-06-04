@@ -27,6 +27,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE , edit=False)
 
     keyboard = [
         [
+            InlineKeyboardButton(get_text(user.id, 'search_btn'), callback_data='search_song')
+        ],
+        [
             InlineKeyboardButton(get_text(user.id, 'help_btn'), callback_data='help'),
             InlineKeyboardButton(get_text(user.id, 'channel_btn'), url='https://t.me/VoidSuspended')
         ],

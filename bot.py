@@ -12,7 +12,7 @@ from config import Config
 from database.user_service import initialize_database, get_locked_channels, log_activity
 from handlers.settings import settings_panel, settings_callback, receive_preset_value, SETTINGS_MENU, WAITING_PRESET_VALUE, WAITING_SETTINGS_CHANNEL   
 from handlers.start import start, initial_language_selection, help_support_callback
-from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL
+from utils.states import SELECT_ACTION, WAITING_INPUT, WAITING_COVER, WAITING_CHANNEL , WAITING_SEARCH_QUERY
 from handlers.editor import (
     start_editor, handle_button_click, receive_new_value, receive_cover, receive_channel,
     cancel_command, cleanup_all_files, handle_timeout, inline_query_handler
@@ -25,6 +25,7 @@ from handlers.admin import (
 )
 from handlers.youtube import handle_youtube_link, process_youtube_callback
 from handlers.instagram import handle_instagram_link, process_instagram_callback
+from handlers.search import ask_search_query, receive_search_query, handle_search_navigation
 from handlers.soundcloud import handle_soundcloud_link, process_soundcloud_callback
 from handlers.spotify import handle_spotify_link, process_spotify_callback
 from handlers.tiktok import handle_tiktok_link, process_tiktok_callback
@@ -299,6 +300,7 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.AUDIO, protected_start_editor),
+                CallbackQueryHandler(ask_search_query, pattern='^search_song$'),
             MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/.+'), protected_youtube_link),
             MessageHandler(filters.Regex(r'(?i)^(https?://)?(www\.)?(instagram\.com|instagr\.am)/.+'), protected_instagram_link),
             MessageHandler(filters.Regex(r'(?i)^(https?://)?(open\.)?spotify\.com/.+'), protected_spotify_link),
@@ -308,6 +310,7 @@ def main():
         states={
             SELECT_ACTION: [
                 CallbackQueryHandler(process_youtube_callback, pattern='^ytdl_'),
+                CallbackQueryHandler(handle_search_navigation, pattern='^(search_prev|search_next|search_load_more)$'),
                 CallbackQueryHandler(process_instagram_callback, pattern='^igdl_'),
                 CallbackQueryHandler(process_spotify_callback, pattern='^spdl_'),
                 CallbackQueryHandler(process_tiktok_callback, pattern='^tkdl_'),
@@ -317,6 +320,10 @@ def main():
             WAITING_INPUT: [
                 CallbackQueryHandler(handle_button_click, pattern='^(goto_advanced|goto_main|cancel)$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_new_value)
+            ],
+            WAITING_SEARCH_QUERY: [
+                CallbackQueryHandler(handle_button_click, pattern='^cancel$'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_search_query)
             ],
             WAITING_COVER: [
                 CallbackQueryHandler(handle_button_click, pattern='^(goto_advanced|goto_main|cancel)$'),
